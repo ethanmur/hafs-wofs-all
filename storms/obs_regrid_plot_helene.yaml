@@ -31,10 +31,10 @@ clip_outside_radius: false
 # same convention as the rest of the repo (StormCase/CyclesCase default).
 grid_res: 0.05
 
-out_dir:          /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grid-tests/helene/
-mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms/helene/
-stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv/helene/
-aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/aorc/helene/
+out_dir:          /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grid-tests/2024-09l-helene/
+mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms/
+stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv/
+aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/aorc/
 
 # MRMS is already cached from the model-verification runs; flip to false
 # once you also want it in the 3-way hourly comparison.
@@ -48,7 +48,7 @@ skip_aorc: false
 regrid:
   grid_template: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs/2024-02l/HFSA/09l.2024092400.hfsa.parent.atm.f000.grb2
   grid_name: hafs_parent
-  cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/regrid_obs/helene/
+  cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/regrid_obs/2024-09l-helene/
   method: BUDGET
   width: 2
   vld_thresh: 0.5
@@ -62,5 +62,5 @@ regrid:
 # zoom_domain is [lat_min, lat_max, lon_min, lon_max] for the extra
 # native-vs-regridded close-up; delete it to skip the zoom maps.
 regrid_plots:
-  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/obs-verification/helene/
+  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/obs-verification/2024-09l-helene/
   zoom_domain: [34.0, 35.0, -83.0, -81.0]
