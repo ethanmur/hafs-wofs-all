@@ -1,0 +1,55 @@
+# Hurricane Beryl — observation-vs-observation validation.
+
+storm_name: Hurricane Beryl
+best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal022024.dat
+
+# pull from relevant hafs and wofs runs
+valid_start: 2024070512
+valid_end: 2024071103
+
+# Wide field domain for the spatial map panels. The best track is drawn on
+# every map regardless of clipping. clip_outside_radius controls whether
+# data outside mask_radius_km is blanked (true) or shown (false, the
+# default) -- off here so a full-domain sanity check is the default view.
+domain: [2.0, 47.0, -105.0, -67.5]
+mask_radius_km: 500
+clip_outside_radius: false
+
+# Common grid for regridded products (anomaly maps, pooled 1:1 heatmaps) --
+# same convention as the rest of the repo (StormCase/CyclesCase default).
+grid_res: 0.05
+
+out_dir:          /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grid-tests/beryl/
+mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms/beryl/
+stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv/beryl/
+aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/aorc/beryl/
+
+# MRMS is already cached from the model-verification runs; flip to false
+# once you also want it in the 3-way hourly comparison.
+skip_mrms: false
+skip_stage4: false
+skip_aorc: false
+
+# MET regridding (regrid-obs). Each obs hour is regridded once onto the grid
+# of grid_template -- any GRIB file on the target grid; the first glob match
+# is used and its grid copied into cache_dir. Needs `module load met/12.2.0`.
+regrid:
+  grid_template:  /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs/2024-02l/HFSA/02l.2024070700.hfsa.parent.atm.f000.grb2
+  #**/*2024092400*parent.atm.f*.grb2
+  grid_name: hafs_parent
+  cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/regrid_obs/beryl/
+  method: BUDGET
+  width: 2
+  vld_thresh: 0.5
+  tolerance_pct: 2.0
+  # Per-source MET field strings, only if a default doesn't match your files:
+  # fields:
+  #   mrms: 'name="MultiSensor_QPE_01H_Pass2"; level="Z0";'
+
+# Maps of the regridded obs (plot-regrid). Subfolders compare-regrid/,
+# compare-products/, compare-anomaly/ are created under out_dir.
+# zoom_domain is [lat_min, lat_max, lon_min, lon_max] for the extra
+# native-vs-regridded close-up; delete it to skip the zoom maps.
+regrid_plots:
+  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/obs-verification/beryl/
+  zoom_domain: [34.0, 35.0, -83.0, -81.0]
