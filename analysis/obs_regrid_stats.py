@@ -20,7 +20,7 @@ The window-combined figures come from histograms accumulated hour by hour,
 never from a pooled point cloud, so memory stays flat over a long window.
 
 Usage:
-    python analysis/run.py storms/helene_obs_compare.yaml stats-regrid
+    python analysis/run.py storms/<case>.yaml stats-regrid
 """
 
 import csv
@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
 import met_regrid
-import obs_compare as oc
+import obs_cases as oc
 from obs_regrid_plots import LABELS, missing_regridded
 
 MIN_RAIN_MM = 0.1        # below this a cell counts as dry, not as light rain

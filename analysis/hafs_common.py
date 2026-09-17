@@ -349,7 +349,7 @@ def load_mrms_hour(s3, hour_end_dt, cache_dir, download=True):
     if not cache_path.exists():
         if not download:
             raise FileNotFoundError(
-                f"MRMS hour not cached: {cache_path} -- obs-compare does "
+                f"MRMS hour not cached: {cache_path} -- regrid-obs does "
                 f"not download; run 'download-obs' for this case first.")
         cache_dir.mkdir(parents=True, exist_ok=True)
         gz_buf = io.BytesIO()

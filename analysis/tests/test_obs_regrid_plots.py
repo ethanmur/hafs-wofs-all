@@ -13,8 +13,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 import yaml
 
-from obs_compare import from_yaml
-from obs_regrid_plots import crop_slices, load_budget, _budget_note
+from obs_cases import from_yaml
+from obs_regrid_plots import (crop_slices, load_budget, track_segment,
+                              _budget_note)
+
+
+_TRACK = [
+    (datetime(2024, 9, 26, 0), 28.0, -84.0),
+    (datetime(2024, 9, 26, 6), 29.0, -84.0),
+    (datetime(2024, 9, 26, 12), 30.0, -84.0),
+]
+
+
+def test_track_segment_interpolates_hourly():
+    seg = track_segment(_TRACK, datetime(2024, 9, 26, 0),
+                        datetime(2024, 9, 26, 6))
+    assert len(seg) == 7
+    assert np.isclose(seg[0][0], 28.0)
+    assert np.isclose(seg[3][0], 28.5)   # halfway between 28 and 29
+    assert np.isclose(seg[-1][0], 29.0)
 
 
 def _grid():

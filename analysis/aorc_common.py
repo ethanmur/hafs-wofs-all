@@ -12,7 +12,7 @@ unit conversion is needed anywhere downstream.
 
 The S3 filesystem and per-year zarr stores are opened lazily and only on a
 cache miss with `download=True` (the default) -- call sites that pass
-`download=False` (obs_compare's comparison path, as opposed to its
+`download=False` (the regrid-obs path, as opposed to its
 download-obs path) never construct either, so they stay usable on a
 no-internet compute node as long as the cache is already populated.
 
@@ -74,7 +74,7 @@ def load_aorc_hour(valid_dt, domain, cache_dir, download=True):
     `download`. On a cache miss: fetches from S3 when `download` is True
     (the login-node download-obs path); raises FileNotFoundError instead of
     touching the network when `download` is False (the compute-node
-    obs-compare path).
+    regrid-obs path).
     """
     cache_dir = Path(cache_dir)
     cache_path = aorc_cache_path(cache_dir, valid_dt)
@@ -88,7 +88,7 @@ def load_aorc_hour(valid_dt, domain, cache_dir, download=True):
 
     if not download:
         raise FileNotFoundError(
-            f"AORC hour not cached: {cache_path} -- obs-compare does not "
+            f"AORC hour not cached: {cache_path} -- regrid-obs does not "
             f"download; run 'download-obs' for this case first.")
 
     cache_dir.mkdir(parents=True, exist_ok=True)

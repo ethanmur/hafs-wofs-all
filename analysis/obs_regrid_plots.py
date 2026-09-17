@@ -11,26 +11,30 @@ For every hour in the case window, into case.regrid_plot_dir:
 Reads the obs cache and the regrid cache only; run regrid-obs first.
 
 Usage:
-    python analysis/run.py storms/helene_obs_compare.yaml plot-regrid
+    python analysis/run.py storms/<case>.yaml plot-regrid
 """
 
 import csv
 import math
 import time
+from datetime import timedelta
 
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from matplotlib.transforms import blended_transform_factory
 import cartopy.crs as ccrs
 
 from hafs_common import QPF_LEVELS
+from hafs_case import position_on_track
 from parent_qpf import qpf_cmap
 from plot_units import inches
 from best_track import parse_bdeck
+from compare import _add_us_geography
 import met_regrid
-import obs_compare as oc
+import obs_cases as oc
 
 LABELS = {"mrms": "MRMS", "stage4": "Stage IV", "aorc": "AORC"}
 TRUTH = "aorc"
@@ -43,6 +47,66 @@ DIFF_LEVELS_IN = np.array([-2, -1, -0.5, -0.25, -0.1, -0.05, -0.01,
 FULL_DOMAIN_MAX_CELLS = 1500
 PANEL_WIDTH_IN = 7.0
 DPI = 120
+
+
+# =============================================================================
+# Track and panel helpers
+# =============================================================================
+
+def track_segment(track, t0, t1, step_hours=1):
+    """[(lat, lon), ...] of the best track sampled hourly over [t0, t1]."""
+    n_hours = int(round((t1 - t0).total_seconds() / 3600))
+    return [position_on_track(track, t0 + timedelta(hours=h))
+            for h in range(0, n_hours + 1, step_hours)]
+
+
+def _draw_track(ax, track_line):
+    lats = [p[0] for p in track_line]
+    lons = [p[1] for p in track_line]
+    ax.plot(lons, lats, color="black", lw=1.4, transform=ccrs.PlateCarree(),
+            zorder=5)
+    ax.plot(lons[-1], lats[-1], marker="o", color="red", markersize=5,
+            transform=ccrs.PlateCarree(), zorder=6)
+
+
+def _panel_frame(ax, domain, track_line, title):
+    """Draw one map panel's frame. Returns the text artists, which the
+    caller MUST pass to savefig(bbox_extra_artists=...): they sit outside
+    the axes, and GeoAxes.get_tightbbox() doesn't report them, so
+    bbox_inches="tight" crops them off otherwise."""
+    lat_min, lat_max, lon_min, lon_max = domain
+    ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
+    _add_us_geography(ax)
+    gl = ax.gridlines(draw_labels=True, linewidth=0.4, linestyle="--",
+                      alpha=0.5)
+    gl.top_labels = gl.right_labels = False
+    if track_line:
+        _draw_track(ax, track_line)
+    # ax.set_title() on a GeoAxes is frequently clipped by
+    # savefig(bbox_inches="tight"); a plain text artist in axes coordinates
+    # is measured correctly and never gets cut off.
+    return [
+        ax.text(0.5, 1.05, title, transform=ax.transAxes, ha="center",
+                va="bottom", fontsize=11),
+        ax.text(0.5, -0.09, "Longitude", transform=ax.transAxes, ha="center",
+                va="top", fontsize=9),
+        ax.text(-0.1, 0.5, "Latitude", transform=ax.transAxes, ha="center",
+                va="center", rotation=90, fontsize=9),
+    ]
+
+
+def _figure_title(fig, axes, text):
+    """Figure-wide title as a text artist just above the panel titles.
+
+    fig.suptitle() places itself in figure coordinates, which on these
+    wide, short figures leaves it stranded far above the maps. Blending
+    figure-x with axes-y instead keeps it horizontally centred on the
+    figure while pinning it to the top of the panels. Returned so the
+    caller can include it in bbox_extra_artists.
+    """
+    transform = blended_transform_factory(fig.transFigure, axes[0].transAxes)
+    return axes[0].text(0.5, 1.13, text, transform=transform, ha="center",
+                        va="bottom", fontsize=13)
 
 
 # =============================================================================
@@ -108,7 +172,7 @@ def map_figure(panels, domain, track_line, title, out_path):
     extra = []
     groups = []   # [style, [axes], mappable]
     for ax, (ptitle, lat, lon, data, style) in zip(axes, panels):
-        extra += oc._panel_frame(ax, domain, track_line, ptitle)
+        extra += _panel_frame(ax, domain, track_line, ptitle)
         if data is None:
             ax.text(0.5, 0.5, "unavailable", ha="center", va="center",
                     transform=ax.transAxes)
@@ -133,7 +197,7 @@ def map_figure(panels, domain, track_line, title, out_path):
         fig.colorbar(mesh, cax=cax, orientation="horizontal", ticks=s["ticks"],
                      extend=s["extend"], label=s["label"], format=s["format"])
         extra.append(cax)
-    extra.append(oc._figure_title(fig, axes, title))
+    extra.append(_figure_title(fig, axes, title))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=DPI, bbox_inches="tight", facecolor="white",
                 bbox_extra_artists=extra, pad_inches=0.4)
@@ -213,7 +277,7 @@ def plot_regrid(case):
     cuts = {}        # (grid key, domain name) -> crop slices
     started = time.monotonic()
     for i, t in enumerate(timestamps, 1):
-        track_line = oc.track_segment(track, case.valid_start, t)
+        track_line = track_segment(track, case.valid_start, t)
         stamp = f"{t:%Y%m%d%H}"
         valid = f"valid {t:%Y-%m-%d %HZ}"
         regridded = {}

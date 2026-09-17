@@ -1,6 +1,6 @@
 """Single entry point for the HAFS QPF/ETS framework.
 
-    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|download-obs|obs-compare]
+    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|download-obs|regrid-obs|plot-regrid|stats-regrid]
 
 Loads a StormCase from the YAML case file and runs the requested product(s):
   parent  nest + parent QPF vs MRMS + Stage IV 4-panel figure
@@ -15,21 +15,17 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
   download-obs  fetch/cache MRMS and AORC obs only -- no regridding or
                 plotting; run this on a login node. Stage IV hourly data is
                 NOT fetched here (see analysis/stage4_hourly.py); place it
-                in the cache yourself (takes an obs-compare YAML)
+                in the cache yourself (takes an obs-case YAML)
   regrid-obs    regrid every cached obs hour onto the regrid.grid_template
                 grid with MET regrid_data_plane, cached as NetCDF, plus a
                 per-hour conservation check CSV; needs `module load met`
-                (takes an obs-compare YAML with a `regrid:` block)
+                (takes an obs-case YAML with a `regrid:` block)
   plot-regrid   hourly maps of the regrid-obs output: native vs regridded
                 (full + zoom domain), all products side by side, and
                 anomalies vs AORC; reads the caches only (same YAML)
   stats-regrid  distributions and cell-by-cell 1:1 comparisons of the
                 regridded products, per hour and over the whole window,
                 land-only and including ocean, plus stats CSVs (same YAML)
-  obs-compare  MRMS/Stage IV/AORC hourly observation-vs-observation
-                comparison, no HAFS forecast involved; reads the cache only
-                and never downloads -- errors immediately if anything
-                needed is missing (takes an obs-compare YAML)
 """
 
 import sys
@@ -39,9 +35,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
             "compare", "replot", "ml", "download-obs", "regrid-obs",
-            "plot-regrid", "stats-regrid", "obs-compare")
-OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "stats-regrid",
-                "obs-compare")
+            "plot-regrid", "stats-regrid")
+OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
 
 
 def parse_args(argv):
@@ -49,7 +44,7 @@ def parse_args(argv):
     if not argv:
         print("usage: run.py <case.yaml> "
               "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|"
-              "download-obs|regrid-obs|plot-regrid|stats-regrid|obs-compare]")
+              "download-obs|regrid-obs|plot-regrid|stats-regrid]")
         raise SystemExit(2)
     yaml_path = argv[0]
     command = argv[1] if len(argv) > 1 else "all"
@@ -80,8 +75,8 @@ def dispatch(case, command):
 def main(argv):
     yaml_path, command = parse_args(argv)
     if command in OBS_COMMANDS:
-        import obs_compare
-        obs_case = obs_compare.from_yaml(yaml_path)
+        import obs_cases
+        obs_case = obs_cases.from_yaml(yaml_path)
         if command == "plot-regrid":
             from obs_regrid_plots import plot_regrid
             plot_regrid(obs_case)
@@ -90,9 +85,8 @@ def main(argv):
             from obs_regrid_stats import stats_regrid
             stats_regrid(obs_case)
             return
-        {"download-obs": obs_compare.download_obs,
-         "regrid-obs": obs_compare.regrid_obs,
-         "obs-compare": obs_compare.run_obs_compare}[command](obs_case)
+        {"download-obs": obs_cases.download_obs,
+         "regrid-obs": obs_cases.regrid_obs}[command](obs_case)
         return
     if command == "ml":
         from ml_regime import load_ml_config, run_ml

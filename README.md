@@ -197,10 +197,9 @@ python analysis/run.py storms/helene_compare.yaml replot
 
 No HAFS forecast involved: validates MRMS, Stage IV, and AORC against each
 other before any of them is trusted as verification truth elsewhere in this
-repo. The best track is always drawn on every map; `clip_outside_radius`
-controls whether data outside `mask_radius_km` of it is blanked (`true`) or
-left visible (`false`, the default) — off by default so the full display
-domain is a sanity check against the raw product, not just the TC footprint.
+repo. Every product is put on one common grid first (`regrid-obs`, via MET),
+and the comparisons run on that regridded output over the full `domain`; the
+best track is drawn on every map.
 
 ```yaml
 storm_name: Hurricane Helene
@@ -208,8 +207,6 @@ best_track: /work2/.../bal092024.dat
 valid_start: 2024092400
 valid_end:   2024092906
 domain: [15.0, 42.0, -100.0, -60.0]
-mask_radius_km: 500
-clip_outside_radius: false   # true blanks data beyond mask_radius_km
 
 out_dir:          analysis/output/helene_obs_compare
 mrms_cache_dir:   /work2/.../mrms_cache
@@ -228,7 +225,7 @@ node can run the comparison against data a login node already fetched:
 # On a login node (has internet): fetch and cache raw MRMS/AORC only -- no
 # regridding, no plotting, sequential requests only. Stage IV hourly data
 # is NOT fetched here -- place ST4.<YYYYMMDD> files under stage4_cache_dir
-# yourself (see analysis/stage4_hourly.py) before running obs-compare.
+# yourself (see analysis/stage4_hourly.py) before running regrid-obs.
 python analysis/run.py storms/helene_obs_compare.yaml download-obs
 
 # On a compute node: regrid every cached obs hour onto the HAFS parent grid
@@ -245,11 +242,11 @@ python analysis/run.py storms/helene_obs_compare.yaml regrid-obs
 # change from the regrid-obs conservation CSV when it exists.
 python analysis/run.py storms/helene_obs_compare.yaml plot-regrid
 
-# On a compute node (no internet): reads the cache only, never downloads.
-# If anything is missing, this prints exactly what's missing and exits
-# immediately rather than attempting a fetch or silently producing a
-# partial comparison.
-python analysis/run.py storms/helene_obs_compare.yaml obs-compare
+# Distributions and cell-by-cell 1:1 comparisons of the regridded products,
+# per hour and over the whole window, land-only (AORC coverage) and
+# including ocean, plus stats_sources_/stats_pairs_ CSVs. Each pair uses the
+# cells where both products report, so MRMS-vs-Stage IV keeps the ocean.
+python analysis/run.py storms/helene_obs_compare.yaml stats-regrid
 ```
 
 `regrid-obs` hands MET exactly one unambiguous field per file: the cached
@@ -263,7 +260,7 @@ target grid is whatever `regrid.grid_template` points at — note HAFS parent
 domains can differ between cycles, so pick a template covering the whole case
 window (the run warns if part of `domain` falls outside it).
 
-All three sources are compared natively hourly, each individually skippable
+All three sources are individually skippable
 (`skip_mrms` / `skip_stage4` / `skip_aorc` — a skipped source is left out of
 every panel and pairing rather than erroring). Stage IV hourly values come
 from NCEP's own `ST4.<YYYYMMDD>` archive files, which bundle a file's 1h
@@ -271,36 +268,10 @@ message alongside its 6h/24h ones for every hour of the day; `stage4_hourly.py`
 reads only the 1h messages, keyed by each message's GRIB-decoded
 accumulation-end time (the same hour-end convention MRMS/AORC already use).
 
-Per hour, this produces a native-grid spatial map per source with the best
-track overlaid; an anomaly map on the common grid for every available pair;
-and one pooled 1:1 hexbin heatmap per pair (RMSE/bias/r annotated) covering
-the whole window, plus a CSV of per-hour paired stats.
-
 AORC (`s3://noaa-nws-aorc-v1-1-1km`, 1-km hourly, no AWS account needed) is
 one Zarr store per year rather than per-timestep files — opened lazily via
 `s3fs`/`xarray.open_zarr`, sliced to the requested hour, and cached locally
 as a small per-hour NetCDF so repeat runs never re-touch S3.
-
-## Analysis viewer
-
-Browse generated cases locally:
-
-```bash
-python analysis/viewer.py
-```
-
-Generate missing products first:
-
-```bash
-python analysis/viewer.py --generate missing
-```
-
-On a remote cluster, forward the printed port through SSH. If port forwarding
-is unavailable, create a self-contained gallery:
-
-```bash
-python analysis/viewer.py --export
-```
 
 ## Verification details
 
@@ -339,13 +310,14 @@ analysis/
   rmse_scatter.py    per-run continuous verification
   cycles.py          fixed-window, multi-initialization analysis
   compare.py         HAFS-A versus HAFS-B analysis
-  obs_compare.py     MRMS/Stage IV/AORC observation-vs-observation analysis
+  obs_cases.py       obs-case config, obs download/cache, and MET regridding
+  obs_regrid_plots.py native-vs-regridded, product, and anomaly maps
+  obs_regrid_stats.py regridded distributions and 1:1 comparisons
   aorc_common.py     NOAA AORC (Zarr, S3) access and per-hour caching
   stage4_hourly.py   NCEP ST4.<day> hourly Stage IV access (cache-only)
   met_regrid.py      MET regrid_data_plane wrapper and conservation check
   skill_metrics.py   shared continuous and neighborhood metrics
   best_track.py      NHC b-deck parsing
-  viewer.py          local/offline results gallery
   tests/             unit and plotting tests
 storms/              active case and cycle configurations
 ```

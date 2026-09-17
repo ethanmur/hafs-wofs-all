@@ -7,17 +7,8 @@ best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal022024.dat
 valid_start: 2024070512
 valid_end: 2024071103
 
-# Wide field domain for the spatial map panels. The best track is drawn on
-# every map regardless of clipping. clip_outside_radius controls whether
-# data outside mask_radius_km is blanked (true) or shown (false, the
-# default) -- off here so a full-domain sanity check is the default view.
+# Wide field domain for the map panels; the best track is drawn on every map.
 domain: [22.0, 47.0, -105.0, -67.5]
-mask_radius_km: 500
-clip_outside_radius: false
-
-# Common grid for regridded products (anomaly maps, pooled 1:1 heatmaps) --
-# same convention as the rest of the repo (StormCase/CyclesCase default).
-grid_res: 0.05
 
 out_dir:          /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grid-tests/2024-02l-beryl/
 mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms/

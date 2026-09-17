@@ -6,12 +6,13 @@
 #
 # Stage IV hourly data (ST4.<YYYYMMDD> files) is NOT fetched by
 # download-obs -- place it under stage4_cache_dir yourself before running
-# obs-compare; see analysis/stage4_hourly.py.
+# regrid-obs; see analysis/stage4_hourly.py.
 #
 # Run with:
-#   python analysis/run.py storms/helene_obs_compare_regrid_plot.yaml obs-compare
-#   python analysis/run.py storms/helene_obs_compare_regrid_plot.yaml regrid-obs
-#   python analysis/run.py storms/helene_obs_compare_regrid_plot.yaml plot-regrid
+#   python analysis/run.py storms/obs_regrid_plot_helene.yaml download-obs
+#   python analysis/run.py storms/obs_regrid_plot_helene.yaml regrid-obs
+#   python analysis/run.py storms/obs_regrid_plot_helene.yaml plot-regrid
+#   python analysis/run.py storms/obs_regrid_plot_helene.yaml stats-regrid
 
 storm_name: Hurricane Helene
 best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal092024.dat
@@ -19,17 +20,8 @@ best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal092024.dat
 valid_start: 2024092404
 valid_end: 2024092906
 
-# Wide field domain for the spatial map panels. The best track is drawn on
-# every map regardless of clipping. clip_outside_radius controls whether
-# data outside mask_radius_km is blanked (true) or shown (false, the
-# default) -- off here so a full-domain sanity check is the default view.
+# Wide field domain for the map panels; the best track is drawn on every map.
 domain: [15.0, 42.0, -100.0, -60.0]
-mask_radius_km: 500
-clip_outside_radius: false
-
-# Common grid for regridded products (anomaly maps, pooled 1:1 heatmaps) --
-# same convention as the rest of the repo (StormCase/CyclesCase default).
-grid_res: 0.05
 
 out_dir:          /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grid-tests/2024-09l-helene/
 mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms/
