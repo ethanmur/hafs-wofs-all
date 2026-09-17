@@ -665,12 +665,12 @@ def regrid_obs(case):
 
     tool = met_regrid.met_tool("regrid_data_plane", cfg.met_bin_dir)
     grid_file = met_regrid.ensure_grid_template(cfg)
-    template = (cfg.grid_dir / "grid_template_source.txt").read_text().strip()
+    template = (cfg.cache_dir / "grid_template_source.txt").read_text().strip()
     print(f"MET tool: {tool}")
     print(f"Grid:     {template}")
     print(f"Method:   {cfg.method} (width {cfg.width}, "
          f"vld_thresh {cfg.vld_thresh})")
-    print(f"Cache:    {cfg.grid_dir}", flush=True)
+    print(f"Cache:    {cfg.cache_dir}", flush=True)
 
     sources = [s for s, skip in (("mrms", case.skip_mrms),
                                  ("stage4", case.skip_stage4),
@@ -678,7 +678,7 @@ def regrid_obs(case):
     if not sources:
         print("All sources skipped -- nothing to regrid.")
         return
-    staging = cfg.grid_dir / "_staging"
+    staging = cfg.cache_dir / "_staging"
     timestamps = hourly_timestamps(case.valid_start, case.valid_end)
     target = None
     native_grids = {}

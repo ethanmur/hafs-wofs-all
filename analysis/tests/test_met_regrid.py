@@ -71,6 +71,20 @@ def _config(tmp, **overrides):
     return met_regrid.RegridConfig(**kwargs)
 
 
+def test_cache_settings_guard_rejects_a_changed_method():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _config(tmp)
+        met_regrid.check_cache_settings(cfg)
+        met_regrid.check_cache_settings(cfg)   # same settings: fine
+        other = _config(tmp, method="NEAREST")
+        try:
+            met_regrid.check_cache_settings(other)
+        except ValueError as err:
+            assert "different settings" in str(err)
+            return
+        raise AssertionError("expected ValueError on a changed method")
+
+
 def _executable(path, body):
     path.write_text("#!/bin/sh\n" + body)
     path.chmod(0o755)
@@ -254,7 +268,7 @@ def test_ensure_grid_template_copies_first_message_once():
         assert sum(1 for _ in met_regrid._grib_messages(small)) == 1
         _, _, vals = met_regrid.read_grib_field(small, want_latlon=False)
         assert vals.shape == (4, 6)
-        assert str(src) in (cfg.grid_dir / "grid_template_source.txt").read_text()
+        assert str(src) in (cfg.cache_dir / "grid_template_source.txt").read_text()
         src.unlink()
         assert met_regrid.ensure_grid_template(cfg) == small   # no re-read
 

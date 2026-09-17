@@ -285,7 +285,7 @@ def stats_regrid(case):
         print("AORC skipped, so there is no land mask -- 'all' variant only.")
     pairs = list(itertools.combinations(sources, 2))
     out = case.regrid_plot_dir
-    print(f"Regrid cache: {cfg.grid_dir}")
+    print(f"Regrid cache: {cfg.cache_dir}")
     print(f"Output:       {out}")
     print(f"Variants:     {', '.join(variants)}   pairs: "
           + ", ".join(f"{LABELS[a]}/{LABELS[b]}" for a, b in pairs), flush=True)

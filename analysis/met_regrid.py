@@ -16,6 +16,7 @@ from scipy.spatial import cKDTree
 
 R_EARTH_KM = 6371.0
 MET_MISSING = -9999.0
+SETTINGS_FILE = "regrid_settings.txt"
 OUTPUT_NAME = "precip"
 SOURCES = ("mrms", "stage4", "aorc")
 # Dry hours make percent differences explode from tiny absolute errors.
@@ -43,16 +44,11 @@ class RegridConfig:
     met_bin_dir: Optional[Path] = None
     fields: dict = field(default_factory=dict)
 
-    @property
-    def grid_dir(self):
-        # Grid and method in the path so a change never mixes two regrids.
-        return self.cache_dir / f"{self.grid_name}_{self.method.lower()}"
-
     def field_spec(self, source):
         return self.fields.get(source, DEFAULT_FIELDS[source])
 
     def output_path(self, source, valid_dt):
-        return self.grid_dir / source / f"{source}_{valid_dt:%Y%m%d%H}.nc"
+        return self.cache_dir / source / f"{source}_{valid_dt:%Y%m%d%H}.nc"
 
 
 def regrid_config_from_dict(cfg):
@@ -140,9 +136,34 @@ def run_regrid(tool, input_path, grid_path, out_path, field_spec, config):
         tmp.unlink(missing_ok=True)
 
 
+def check_cache_settings(config):
+    """Refuse to mix two different regrids in one cache_dir.
+
+    Output used to sit in a <grid_name>_<method> subdirectory, so this was
+    impossible by construction; the settings are recorded in the cache
+    itself now that cache_dir is a single storm's folder.
+    """
+    path = config.cache_dir / SETTINGS_FILE
+    want = (f"grid_name={config.grid_name}\nmethod={config.method}\n"
+            f"width={config.width}\nvld_thresh={config.vld_thresh}\n")
+    if path.exists():
+        have = path.read_text()
+        if have != want:
+            raise ValueError(
+                f"{config.cache_dir} already holds output regridded with "
+                f"different settings:\n  on disk:    "
+                f"{' '.join(have.split())}\n  configured: "
+                f"{' '.join(want.split())}\nPoint regrid.cache_dir at a new "
+                "directory, or delete the output already in this one.")
+        return
+    config.cache_dir.mkdir(parents=True, exist_ok=True)
+    path.write_text(want)
+
+
 def ensure_grid_template(config):
     """Single-message copy of the template's grid, cut once and reused."""
-    small = config.grid_dir / "grid_template.grb2"
+    check_cache_settings(config)
+    small = config.cache_dir / "grid_template.grb2"
     if small.exists():
         return small
     hits = sorted(glob.glob(config.grid_template, recursive=True))
@@ -161,7 +182,7 @@ def ensure_grid_template(config):
     finally:
         eccodes.codes_release(gid)
     write_bytes(small, msg)
-    (config.grid_dir / "grid_template_source.txt").write_text(f"{src}\n")
+    (config.cache_dir / "grid_template_source.txt").write_text(f"{src}\n")
     return small
 
 

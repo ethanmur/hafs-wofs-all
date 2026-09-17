@@ -200,7 +200,7 @@ def plot_regrid(case):
     if case.zoom_domain:
         domains["zoom"] = case.zoom_domain
     grid_desc = f"{cfg.grid_name} grid ({cfg.method})"
-    print(f"Regrid cache: {cfg.grid_dir}")
+    print(f"Regrid cache: {cfg.cache_dir}")
     print(f"Output:       {out}")
     print(f"Domains:      " + "  ".join(f"{k}={v}" for k, v in domains.items()),
           flush=True)
