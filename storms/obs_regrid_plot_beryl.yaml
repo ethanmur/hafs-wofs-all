@@ -11,7 +11,7 @@ valid_end: 2024071103
 # every map regardless of clipping. clip_outside_radius controls whether
 # data outside mask_radius_km is blanked (true) or shown (false, the
 # default) -- off here so a full-domain sanity check is the default view.
-domain: [2.0, 47.0, -105.0, -67.5]
+domain: [22.0, 47.0, -105.0, -67.5]
 mask_radius_km: 500
 clip_outside_radius: false
 
@@ -19,7 +19,7 @@ clip_outside_radius: false
 # same convention as the rest of the repo (StormCase/CyclesCase default).
 grid_res: 0.05
 
-out_dir:          /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grid-tests/beryl/
+out_dir:          /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grid-tests/2024-02l-beryl/
 mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms/
 stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv/
 aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/aorc/
@@ -34,8 +34,7 @@ skip_aorc: false
 # of grid_template -- any GRIB file on the target grid; the first glob match
 # is used and its grid copied into cache_dir. Needs `module load met/12.2.0`.
 regrid:
-  grid_template:  /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs/2024-02l/HFSA/02l.2024070700.hfsa.parent.atm.f000.grb2
-  #**/*2024092400*parent.atm.f*.grb2
+  grid_template:  /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs/2024-02l/HFSA/2024070518/02l.2024070518.hfsa.parent.atm.f000.grb2
   grid_name: hafs_parent
   cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/regrid_obs/2024-02l-beryl/
   method: BUDGET
