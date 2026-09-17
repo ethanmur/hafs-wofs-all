@@ -414,7 +414,7 @@ def test_regrid_config_defaults_and_cache_layout():
          "fields": {"mrms": 'name="X"; level="Z0";'}})
     assert cfg.method == "BUDGET" and cfg.width == 2 and cfg.vld_thresh == 0.5
     assert cfg.output_path("stage4", datetime(2024, 9, 24, 2)) == Path(
-        "/c/hafs_parent_budget/stage4/stage4_2024092402.nc")
+        "/c/stage4/stage4_2024092402.nc")
     assert cfg.field_spec("mrms") == 'name="X"; level="Z0";'
     assert cfg.field_spec("aorc") == met_regrid.DEFAULT_FIELDS["aorc"]
 

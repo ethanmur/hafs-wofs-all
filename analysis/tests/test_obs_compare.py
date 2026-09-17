@@ -144,7 +144,7 @@ def test_from_yaml_regrid_block_is_optional():
             "cache_dir": "/cache", "tolerance_pct": 1.5}}))
         cfg = from_yaml(with_regrid).regrid
         assert cfg.method == "BUDGET" and cfg.tolerance_pct == 1.5
-        assert cfg.grid_dir == Path("/cache/hafs_parent_budget")
+        assert cfg.grid_dir == Path("/cache/")
 
 
 def test_from_yaml_requires_core_fields():
