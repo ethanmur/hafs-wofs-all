@@ -107,11 +107,6 @@ def test_cycles_from_yaml_defaults_and_slug():
         assert cc.track_step_hours == 6
         assert cc.headline_fss_threshold_in is None
         assert cc.headline_fss_scale_cells is None
-        assert cc.object_threshold_mm == cc.ets_threshold_mm
-        assert cc.object_smooth_cells == 5
-        assert cc.object_min_area_cells == 25
-        assert cc.ml_features is True
-        assert cc.ml_features_csv.name == "ml_features.csv"
         assert cc.thresholds_mm[0] == 1
         assert cc.case_slug == "helene_hfsa_cycles"
         assert cc.output_slug == "helene_hfsa_cycles_2024092600_2024092800"
@@ -181,7 +176,6 @@ def _tiny_cycles_case(root, out):
         ets_bar_thresholds_in=[1.0 / 25.4],
         fss_thresholds_in=[1.0 / 25.4], fss_scales_cells=[1, 3],
         make_animation=False,
-        ml_features=False,
     )
 
 
@@ -474,8 +468,6 @@ def test_compute_cycles_writes_csv_and_pngs():
     from cycles import SUMMARY_FIELDS, compute_cycles
     with tempfile.TemporaryDirectory() as tmp:
         ccase = _tiny_cycles_case(tmp, tmp)
-        ccase.ml_features = True
-        ccase.ml_features_csv = Path(tmp) / "ml_features.csv"
         slug = "testcycles_2024092600_2024092800"
         errors_png = Path(tmp) / f"cycles_errors_{slug}.png"
         maps_png = Path(tmp) / f"cycles_maps_{slug}.png"
@@ -497,7 +489,6 @@ def test_compute_cycles_writes_csv_and_pngs():
         percentiles_png = Path(tmp) / f"cycles_percentiles_{slug}.png"
         summary_csv = Path(tmp) / f"cycles_summary_{slug}.csv"
         track_csv = Path(tmp) / f"cycles_track_{slug}.csv"
-        features_csv = Path(tmp) / "ml_features.csv"
         assert csv_path.exists(), "CSV not written"
         assert metrics_png.exists(), "metrics PNG not written"
         assert ets_png.exists(), "ETS lead-time plot not written"
@@ -513,7 +504,6 @@ def test_compute_cycles_writes_csv_and_pngs():
         assert percentiles_png.exists(), "percentile PNG not written"
         assert summary_csv.exists(), "summary CSV not written"
         assert not track_csv.exists(), "track CSV written without best track"
-        assert features_csv.exists(), "ML feature CSV not written"
         with open(csv_path) as fh:
             rows = list(csvmod.DictReader(fh))
         # 2 cycles x parent forecast x 1 obs (Stage IV None) x 1 threshold.
@@ -544,9 +534,6 @@ def test_compute_cycles_writes_csv_and_pngs():
         assert len(summary) == 2
         assert float(summary[0]["rmse"]) == 1.0
         assert summary[0]["mean_track_err_km"] == ""
-        with open(features_csv) as fh:
-            features = list(csvmod.DictReader(fh))
-        assert len(features) == 2
 
 
 def test_pooled_ets_by_threshold_sums_counts_before_scoring():

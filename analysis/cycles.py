@@ -50,15 +50,15 @@ from parent_qpf import (
 )
 from skill_metrics import continuous_scores, fractions_skill_score
 from precip_structure import (
-    distribution_stats, object_comparison, plot_distributions,
-    plot_pattern_r, plot_percentiles_by_cycle,
+    distribution_stats, plot_distributions, plot_pattern_r,
+    plot_percentiles_by_cycle,
 )
 from rmse_scatter import valid_points
 from best_track import parse_bdeck_full
 from track_skill import (
     cycle_track_summary, landfall_metrics, mean_displacement_deg,
     plot_shifted_skill, plot_track_error, plot_track_precip,
-    motion_vector, score_shifted, track_error_rows,
+    score_shifted, track_error_rows,
 )
 from plot_units import format_inches, format_miles, inches, miles
 
@@ -73,10 +73,6 @@ SUMMARY_FIELDS = [
     "ets_shifted", "fss_shifted", "rmse_shifted", "pattern_r_shifted",
     "fcst_p90", "fcst_p95", "fcst_p99", "obs_p90", "obs_p95", "obs_p99",
     "fcst_volume_km3", "obs_volume_km3", "volume_ratio",
-    "obj_area_fcst_km2", "obj_area_obs_km2", "obj_area_ratio",
-    "obj_centroid_err_km", "obj_centroid_along_km",
-    "obj_centroid_cross_km", "obj_angle_diff_deg", "obj_mean_ratio",
-    "obj_max_ratio",
 ]
 
 
@@ -1100,16 +1096,6 @@ def compute_cycles(ccase, fields=None):
             row["fcst_volume_km3"] / obs_volume
             if np.isfinite(row["fcst_volume_km3"])
             and np.isfinite(obs_volume) and obs_volume != 0 else np.nan)
-        midpoint = (cyc.get("valid_start", ccase.valid_start)
-                    + (cyc.get("valid_end", ccase.valid_end)
-                       - cyc.get("valid_start", ccase.valid_start)) / 2)
-        motion_unit = (motion_vector(bdeck_full, midpoint)
-                       if bdeck_full is not None else None)
-        row.update(object_comparison(
-            cyc["parent_win"], _cycle_observation(cyc, fields, "MRMS"),
-            swath, fields["grid_lat"], fields["grid_lon"],
-            ccase.object_threshold_mm, ccase.object_smooth_cells,
-            ccase.object_min_area_cells, motion_unit))
         row.update(track_summaries_by_init.get(init_dt, {}))
         if bdeck_full is not None:
             dlat, dlon = mean_displacement_deg(
@@ -1198,26 +1184,6 @@ def compute_cycles(ccase, fields=None):
                 print(f"Animation unavailable ({out_animation.name}): {exc}")
             else:
                 print(f"Saved movie: {out_animation}")
-
-    if ccase.ml_features:
-        try:
-            from ml_features import append_features, extract_cycle_features
-            feature_rows = []
-            for cyc, summary_row in zip(fields["cycles"], summary_rows):
-                case = cyc.get("_case")
-                if case is None:
-                    try:
-                        case = cycle_storm_case(ccase, cyc["init_str"])
-                    except Exception as exc:
-                        print(f"  feature case {cyc['init_str']}: {exc}")
-                feature_rows.append(extract_cycle_features(
-                    ccase, case, cyc, summary_row, bdeck_full))
-            append_features(feature_rows, ccase.ml_features_csv)
-            print(f"features: appended {len(feature_rows)} rows to "
-                  f"{ccase.ml_features_csv}")
-        except Exception as exc:
-            print(f"features: extraction failed: {exc}")
-
 
 if __name__ == "__main__":
     compute_cycles(cycles_from_yaml(sys.argv[1]))

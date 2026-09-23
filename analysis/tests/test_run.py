@@ -47,12 +47,6 @@ def test_parse_args_accepts_cycles_compare():
     assert command == "cycles-compare"
 
 
-def test_parse_args_accepts_ml():
-    yaml_path, command = parse_args(["storms/ml_regime.yaml", "ml"])
-    assert yaml_path == "storms/ml_regime.yaml"
-    assert command == "ml"
-
-
 def _run_all():
     """Discover and run all test_* functions."""
     import inspect

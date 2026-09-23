@@ -417,17 +417,7 @@ class CyclesCase:
     track_step_hours: int = 6
     headline_fss_threshold_in: float = None
     headline_fss_scale_cells: int = None
-    object_threshold_mm: float = None
-    object_smooth_cells: int = 5
-    object_min_area_cells: int = 25
     storm_id: str = None   # e.g. 'AL09'; isolates one storm in a multistorm track
-    ml_features: bool = True
-    ml_features_csv: Path = field(default_factory=lambda: (
-        Path(__file__).resolve().parent / "output" / "ml_features.csv"))
-
-    def __post_init__(self):
-        if self.object_threshold_mm is None:
-            self.object_threshold_mm = self.ets_threshold_mm
 
     def fixed_grid(self):
         """Fixed lat/lon verification/plot mesh from domain + grid_res."""
@@ -548,16 +538,6 @@ def cycles_from_yaml(yaml_path):
         headline_fss_scale_cells=(
             int(cfg["headline_fss_scale_cells"])
             if cfg.get("headline_fss_scale_cells") is not None else None),
-        object_threshold_mm=(
-            float(cfg["object_threshold_mm"])
-            if cfg.get("object_threshold_mm") is not None else None),
-        object_smooth_cells=int(cfg.get("object_smooth_cells", 5)),
-        object_min_area_cells=int(cfg.get("object_min_area_cells", 25)),
-        ml_features=bool(cfg.get("ml_features", True)),
-        ml_features_csv=(Path(cfg["ml_features_csv"])
-                         if cfg.get("ml_features_csv") else
-                         Path(__file__).resolve().parent / "output" /
-                         "ml_features.csv"),
     )
 
 

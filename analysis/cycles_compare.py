@@ -395,44 +395,6 @@ def plot_shifted_ets_comparison(models, label, out_path):
     plt.close(fig)
 
 
-def plot_objects_comparison(models, label, out_path):
-    """Object area ratio and centroid error versus landfall lead by model."""
-    fig, axes = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
-    have_data = False
-    for index, model in enumerate(models):
-        rows = sorted(model["summary"],
-                      key=lambda row: row.get("lead_hours_to_landfall", np.nan))
-        x = np.asarray([row.get("lead_hours_to_landfall", np.nan) for row in rows])
-        color = MODEL_COLORS.get(model["name"], plt.cm.Set2(index))
-        for ax, key, marker in (
-                (axes[0], "obj_area_ratio", "o"),
-                (axes[1], "obj_centroid_err_km", "s")):
-            y = np.asarray([row.get(key, np.nan) for row in rows])
-            if key == "obj_centroid_err_km":
-                y = miles(y)
-            valid = np.isfinite(x) & np.isfinite(y)
-            if valid.any():
-                have_data = True
-                ax.plot(x[valid], y[valid], marker=marker, lw=2,
-                        color=color, label=model["name"])
-    if not have_data:
-        plt.close(fig)
-        return False
-    axes[0].axhline(1.0, color="gray", ls=":", lw=0.9)
-    axes[0].set_ylabel("Forecast / MRMS object area")
-    axes[1].set_ylabel("Centroid error (miles)")
-    axes[1].set_xlabel("Hours before landfall (forecast initialization)")
-    axes[1].invert_xaxis()
-    for ax in axes:
-        ax.grid(True, ls=":", alpha=0.45)
-        ax.legend(frameon=False)
-    fig.suptitle(f"{label}\nPrecipitation-object comparison")
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=170, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    return True
-
-
 def generate_cycles_comparison(config):
     """Load available cycle tables and write the comparison figures."""
     models = [load_model_tables(model) for model in config["models"]]
@@ -458,9 +420,6 @@ def generate_cycles_comparison(config):
             path = config["out_dir"] / filename
             plotter(models, config["label"], path)
             print(f"Saved plot : {path}")
-        object_path = config["out_dir"] / "cycles_compare_objects.png"
-        if plot_objects_comparison(models, config["label"], object_path):
-            print(f"Saved plot : {object_path}")
     else:
         print("Summary comparison plots skipped — no model has summary rows.")
     return models

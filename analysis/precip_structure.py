@@ -1,26 +1,17 @@
-"""Precipitation-distribution, pattern, and object verification helpers."""
+"""Precipitation-distribution and pattern verification helpers."""
 
 import numpy as np
-from scipy.ndimage import label, uniform_filter
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from skill_metrics import cell_area_km2
-from track_skill import along_cross_km
 from plot_units import cubic_miles, inches, miles, square_miles
 
 
 DIST_FIELDS = ("p50", "p90", "p95", "p99", "max_mm", "volume_km3",
                "wet_frac")
-OBJECT_FIELDS = (
-    "obj_area_fcst_km2", "obj_area_obs_km2", "obj_area_ratio",
-    "obj_centroid_err_km", "obj_centroid_along_km",
-    "obj_centroid_cross_km", "obj_angle_diff_deg", "obj_mean_ratio",
-    "obj_max_ratio",
-)
-
 _PLOT_TYPOGRAPHY = {
     "font.weight": "bold",
     "axes.titleweight": "bold",
@@ -36,13 +27,6 @@ def _apply_plot_typography():
 
 def _nan_dict(keys):
     return {key: np.nan for key in keys}
-
-
-def _safe_ratio(numerator, denominator):
-    if (not np.isfinite(numerator) or not np.isfinite(denominator)
-            or denominator == 0):
-        return np.nan
-    return float(numerator / denominator)
 
 
 def distribution_stats(field, swath, grid_lat, grid_res):
@@ -257,170 +241,6 @@ def plot_pattern_r(ccase, summary_rows, out_path):
     _format_cycle_axis(ax, ccase, inits, x)
     ax.set_title(
         f"{ccase.storm_name} — {ccase.model_label} Pattern Correlation vs MRMS")
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=140, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    return True
-
-
-def largest_object(field, swath, threshold_mm, smooth_cells, min_area_cells):
-    """Largest qualifying connected precipitation object, or ``None``."""
-    field = np.asarray(field, dtype=float)
-    swath = np.asarray(swath, dtype=bool)
-    size = max(1, int(smooth_cells))
-    smooth = uniform_filter(np.nan_to_num(field, nan=0.0), size=size,
-                            mode="constant", cval=0.0)
-    objects, count = label((smooth >= float(threshold_mm)) & swath)
-    if count == 0:
-        return None
-    sizes = np.bincount(objects.ravel())
-    sizes[0] = 0
-    largest = int(np.argmax(sizes))
-    if sizes[largest] < int(min_area_cells):
-        return None
-    return objects == largest
-
-
-def _grid_resolution(grid_lat, grid_lon):
-    candidates = []
-    for grid in (np.asarray(grid_lat, dtype=float),
-                 np.asarray(grid_lon, dtype=float)):
-        for axis in (0, 1):
-            values = np.abs(np.diff(grid, axis=axis))
-            values = values[np.isfinite(values) & (values > 0)]
-            if values.size:
-                candidates.append(float(np.median(values)))
-    return float(np.median(candidates)) if candidates else np.nan
-
-
-def object_properties(obj_mask, raw_field, grid_lat, grid_lon):
-    """Area, centroid, orientation, and intensity of one object mask."""
-    mask = np.asarray(obj_mask, dtype=bool)
-    if not mask.any():
-        return _nan_dict(("area_km2", "centroid_lat", "centroid_lon",
-                          "angle_deg", "mean_mm", "max_mm"))
-    grid_lat = np.asarray(grid_lat, dtype=float)
-    grid_lon = np.asarray(grid_lon, dtype=float)
-    raw_field = np.asarray(raw_field, dtype=float)
-    grid_res = _grid_resolution(grid_lat, grid_lon)
-    area_grid = cell_area_km2(grid_lat, grid_res)
-    weights = area_grid[mask]
-    lat = grid_lat[mask]
-    lon = grid_lon[mask]
-    area = float(np.sum(weights))
-    centroid_lat = float(np.average(lat, weights=weights))
-    centroid_lon = float(np.average(lon, weights=weights))
-    mean_lat = float(np.mean(lat))
-    x = lon * 111.0 * np.cos(np.radians(mean_lat))
-    y = lat * 111.0
-    angle = np.nan
-    if x.size >= 2:
-        covariance = np.cov(np.vstack((x, y)), bias=True)
-        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-        if np.isfinite(eigenvalues[-1]) and eigenvalues[-1] > 0:
-            vector = eigenvectors[:, -1]
-            angle = float(np.degrees(np.arctan2(vector[1], vector[0])) % 180.0)
-    raw = raw_field[mask]
-    raw = raw[np.isfinite(raw)]
-    return {
-        "area_km2": area,
-        "centroid_lat": centroid_lat,
-        "centroid_lon": centroid_lon,
-        "angle_deg": angle,
-        "mean_mm": float(np.mean(raw)) if raw.size else np.nan,
-        "max_mm": float(np.max(raw)) if raw.size else np.nan,
-    }
-
-
-def object_comparison(fcst, obs, swath, grid_lat, grid_lon, threshold_mm,
-                      smooth_cells, min_area_cells, motion_unit):
-    """Compare the largest forecast and observed precipitation objects."""
-    try:
-        fcst_obj = largest_object(fcst, swath, threshold_mm, smooth_cells,
-                                  min_area_cells)
-        obs_obj = largest_object(obs, swath, threshold_mm, smooth_cells,
-                                 min_area_cells)
-        if fcst_obj is None or obs_obj is None:
-            return _nan_dict(OBJECT_FIELDS)
-        fp = object_properties(fcst_obj, fcst, grid_lat, grid_lon)
-        op = object_properties(obs_obj, obs, grid_lat, grid_lon)
-        mean_lat = 0.5 * (fp["centroid_lat"] + op["centroid_lat"])
-        east = ((fp["centroid_lon"] - op["centroid_lon"]) * 111.0
-                * np.cos(np.radians(mean_lat)))
-        north = (fp["centroid_lat"] - op["centroid_lat"]) * 111.0
-        along, cross = along_cross_km(east, north, motion_unit)
-        angle_diff = np.nan
-        if np.isfinite(fp["angle_deg"]) and np.isfinite(op["angle_deg"]):
-            delta = abs(fp["angle_deg"] - op["angle_deg"]) % 180.0
-            angle_diff = float(min(delta, 180.0 - delta))
-        return {
-            "obj_area_fcst_km2": fp["area_km2"],
-            "obj_area_obs_km2": op["area_km2"],
-            "obj_area_ratio": _safe_ratio(fp["area_km2"], op["area_km2"]),
-            "obj_centroid_err_km": float(np.hypot(east, north)),
-            "obj_centroid_along_km": np.nan if along is None else along,
-            "obj_centroid_cross_km": np.nan if cross is None else cross,
-            "obj_angle_diff_deg": angle_diff,
-            "obj_mean_ratio": _safe_ratio(fp["mean_mm"], op["mean_mm"]),
-            "obj_max_ratio": _safe_ratio(fp["max_mm"], op["max_mm"]),
-        }
-    except (TypeError, ValueError, IndexError, np.linalg.LinAlgError):
-        return _nan_dict(OBJECT_FIELDS)
-
-
-def plot_objects(ccase, summary_rows, out_path):
-    """Plot object areas/ratios and centroid displacement components."""
-    _apply_plot_typography()
-    rows = [row for row in summary_rows
-            if any(np.isfinite(row.get(key, np.nan)) for key in OBJECT_FIELDS)]
-    if not rows:
-        return False
-    rows, inits, x_values = _cycle_x(ccase, rows)
-    x = np.arange(len(rows), dtype=float)
-    fig, axes = plt.subplots(2, 1, figsize=(11, 8.5), sharex=True)
-    width = 0.36
-    axes[0].bar(x - width / 2,
-                [square_miles(row.get("obj_area_fcst_km2", np.nan))
-                 for row in rows],
-                width, color="#2563a6", label="forecast area")
-    axes[0].bar(x + width / 2,
-                [square_miles(row.get("obj_area_obs_km2", np.nan))
-                 for row in rows],
-                width, color="#555555", label="MRMS area")
-    ratio_ax = axes[0].twinx()
-    ratio_ax.plot(x, [row.get("obj_area_ratio", np.nan) for row in rows],
-                  color="#d97941", marker="o", lw=1.8, label="area ratio")
-    ratio_ax.axhline(1.0, color="#d97941", ls=":", lw=0.9)
-    ratio_ax.set_ylabel("Forecast / MRMS area")
-    axes[0].set_ylabel("Object area (square miles)")
-    axes[0].legend(loc="upper left", frameon=False)
-    ratio_ax.legend(loc="upper right", frameon=False)
-    axes[1].bar(x - width / 2,
-                [miles(row.get("obj_centroid_along_km", np.nan))
-                 for row in rows],
-                width, color="#2a9d78", label="along-track")
-    axes[1].bar(x + width / 2,
-                [miles(row.get("obj_centroid_cross_km", np.nan))
-                 for row in rows],
-                width, color="#c43d4d", label="cross-track")
-    axes[1].plot(x, [miles(row.get("obj_centroid_err_km", np.nan))
-                     for row in rows],
-                 color="#222222", marker="o", lw=2, label="total error")
-    axes[1].axhline(0.0, color="#777777", ls=":", lw=0.9)
-    axes[1].set_ylabel("Centroid displacement (miles)")
-    axes[1].legend(frameon=False, ncols=3)
-    for ax in axes:
-        ax.grid(True, axis="y", ls=":", alpha=0.4)
-    axes[-1].set_xticks(x)
-    if ccase.landfall_time is not None:
-        axes[-1].set_xticklabels([f"{value:.0f}" for value in x_values])
-        axes[-1].set_xlabel("Hours before landfall (forecast initialization)")
-        axes[-1].invert_xaxis()
-    else:
-        axes[-1].set_xticklabels([value.strftime("%m-%d %HZ") for value in inits],
-                                 rotation=45, ha="right")
-        axes[-1].set_xlabel("initialization")
-    fig.suptitle(f"{ccase.storm_name} — {ccase.model_label} precipitation objects")
     fig.tight_layout()
     fig.savefig(out_path, dpi=140, bbox_inches="tight", facecolor="white")
     plt.close(fig)

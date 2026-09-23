@@ -1,6 +1,6 @@
 """Single entry point for the HAFS QPF/ETS framework.
 
-    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|download-obs|regrid-obs|plot-regrid|stats-regrid]
+    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|download-obs|regrid-obs|plot-regrid|stats-regrid]
 
 Loads a StormCase from the YAML case file and runs the requested product(s):
   parent  nest + parent QPF vs MRMS + Stage IV 4-panel figure
@@ -11,7 +11,6 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
   all     parent + ets + rmse (fields built once; default)
   compare HFSA-vs-HFSB rainfall comparison (takes a comparison YAML)
   replot  redraw the comparison figures from existing CSVs (no recompute)
-  ml      pooled ML regime diagnostics over a feature CSV
   download-obs  fetch/cache MRMS and AORC obs only -- no regridding or
                 plotting; run this on a login node. Stage IV hourly data is
                 NOT fetched here (see analysis/stage4_hourly.py); place it
@@ -34,7 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
-            "compare", "replot", "ml", "download-obs", "regrid-obs",
+            "compare", "replot", "download-obs", "regrid-obs",
             "plot-regrid", "stats-regrid")
 OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
 
@@ -43,7 +42,7 @@ def parse_args(argv):
     """(yaml_path, command) from argv; command defaults to 'all'."""
     if not argv:
         print("usage: run.py <case.yaml> "
-              "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|ml|"
+              "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|"
               "download-obs|regrid-obs|plot-regrid|stats-regrid]")
         raise SystemExit(2)
     yaml_path = argv[0]
@@ -87,10 +86,6 @@ def main(argv):
             return
         {"download-obs": obs_cases.download_obs,
          "regrid-obs": obs_cases.regrid_obs}[command](obs_case)
-        return
-    if command == "ml":
-        from ml_regime import load_ml_config, run_ml
-        run_ml(load_ml_config(yaml_path))
         return
     if command == "cycles-compare":
         from cycles_compare import (load_cycles_comparison,
