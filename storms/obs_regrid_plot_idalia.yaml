@@ -1,0 +1,45 @@
+# Hurricane Beryl — observation-vs-observation validation.
+
+storm_name: Hurricane Idalia
+best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal102023.dat
+
+# pull from relevant hafs and wofs runs
+valid_start: 2023082618
+valid_end: 2023083106
+
+# Wide field domain for the map panels; the best track is drawn on every map.
+domain: [22.5, 37.5, -90.0, -77.]
+
+out_dir:          /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grid-tests/2023-10l-idalia/
+mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms/
+stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv/
+aorc_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/aorc/
+
+# MRMS is already cached from the model-verification runs; flip to false
+# once you also want it in the 3-way hourly comparison.
+skip_mrms: false
+skip_stage4: false
+skip_aorc: false
+
+# MET regridding (regrid-obs). Each obs hour is regridded once onto the grid
+# of grid_template -- any GRIB file on the target grid; the first glob match
+# is used and its grid copied into cache_dir. Needs `module load met/12.2.0`.
+regrid:
+  grid_template: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs/2023-10l/HFSA/2023082618/10l.2023082618.hfsa.parent.atm.f000.grb2
+  grid_name: hafs_parent
+  cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/regrid_obs/2023-10l-idalia/
+  method: BUDGET
+  width: 2
+  vld_thresh: 0.5
+  tolerance_pct: 2.0
+  # Per-source MET field strings, only if a default doesn't match your files:
+  # fields:
+  #   mrms: 'name="MultiSensor_QPE_01H_Pass2"; level="Z0";'
+
+# Maps of the regridded obs (plot-regrid). Subfolders compare-regrid/,
+# compare-products/, compare-anomaly/ are created under out_dir.
+# zoom_domain is [lat_min, lat_max, lon_min, lon_max] for the extra
+# native-vs-regridded close-up; delete it to skip the zoom maps.
+regrid_plots:
+  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/obs-verification/2023-10l-idalia/
+  zoom_domain: [29.0, 31.0, -86.0, -83.0]
