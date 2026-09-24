@@ -671,7 +671,7 @@ def build_grid_case(case):
           f"(worst {report['worst_pct']:.2f}% from {spec.res_km:g} km)")
     print(f"MET    : {spec.met_spec}")
 
-    out_dir = Path(case.out_dir) / "grid"
+    out_dir = Path(case.out_dir)
     payload = grid_to_dict(spec, report, extra={
         "case": case.case_slug,
         "storm_name": case.storm_name,

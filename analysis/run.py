@@ -26,7 +26,7 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
                 regridded products, per hour and over the whole window,
                 land-only and including ocean, plus stats CSVs (same YAML)
   build-grid    build this case's common verification grid from the best track
-                inside the valid window, write <out_dir>/grid/<case>_grid.json
+                inside the valid window, write <out_dir>/<case>_grid.json
                 with the MET grid spec, and draw the sanity map (grid outline,
                 track by ATCF status, statistics swath, WoFS box)
 """

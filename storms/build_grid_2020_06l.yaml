@@ -2,7 +2,7 @@
 #
 #   python analysis/run.py storms/build_grid_2020_06l.yaml build-grid
 #
-# Writes <out_dir>/grid/build_grid_2020_06l_grid.json (Lambert parameters + the MET grid
+# Writes <out_dir>/build_grid_2020_06l_grid.json (Lambert parameters + the MET grid
 # spec) and a sanity map of the grid, best track by ATCF status, statistics
 # swath, and WoFS box.
 
@@ -40,7 +40,7 @@ valid_end:   2020071118
 # track, not from this.
 domain: [24, 49, -92, -70]
 
-out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grids/2020-06l/
+out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grids/
 
 verification_grid:
   res_km: 6.0
