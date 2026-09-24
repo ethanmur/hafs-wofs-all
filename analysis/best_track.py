@@ -76,6 +76,7 @@ def parse_bdeck_full(path):
             row = {
                 "t": t, "lat": lat, "lon": lon,
                 "status": cols[10] if len(cols) > 10 else "",
+                "name": cols[27] if len(cols) > 27 else "",
                 "vmax_kt": _optional_value(cols, 8),
                 "mslp_hpa": _optional_value(cols, 9),
                 "rmw_km": _rmw_km(cols),
@@ -83,7 +84,8 @@ def parse_bdeck_full(path):
             if t not in by_time:
                 by_time[t] = row
             else:
-                for key in ("status", "vmax_kt", "mslp_hpa", "rmw_km"):
+                for key in ("status", "name", "vmax_kt", "mslp_hpa",
+                            "rmw_km"):
                     if not by_time[t][key] and row[key]:
                         by_time[t][key] = row[key]
     track = [by_time[t] for t in sorted(by_time)]
@@ -105,16 +107,36 @@ def parse_bdeck_status(path):
             for r in parse_bdeck_full(path)]
 
 
+PLACEHOLDER_NAMES = {"INVEST", "UNNAMED", "NONAME", "GENESIS", ""}
+
+
+def storm_name(rows):
+    """Most frequent real name in a b-deck's rows.
+
+    Early fixes carry placeholders ('INVEST', or the advisory number such as
+    'TWO') before naming, so take the commonest non-placeholder instead of the
+    first or last one.
+    """
+    counts = {}
+    for row in rows:
+        name = row.get("name", "").strip().upper()
+        if name and name not in PLACEHOLDER_NAMES:
+            counts[name] = counts.get(name, 0) + 1
+    return max(counts, key=counts.get) if counts else "UNNAMED"
+
+
 def bdeck_summary(path):
-    """Track extent and status mix for one b-deck, for inventory reporting."""
-    track = parse_bdeck_status(path)
+    """Track extent, name, and status mix for one b-deck, for inventories."""
+    rows = parse_bdeck_full(path)
+    track = [(r["t"], r["lat"], r["lon"], r["status"]) for r in rows]
     lats = [lat for _, lat, _, _ in track]
     lons = [lon for _, _, lon, _ in track]
     seen = []
     for _, _, _, status in track:
         if status and status not in seen:
             seen.append(status)
-    return {"n": len(track), "first": track[0][0], "last": track[-1][0],
+    return {"n": len(track), "name": storm_name(rows).title(),
+            "first": track[0][0], "last": track[-1][0],
             "lat_min": min(lats), "lat_max": max(lats),
             "lon_min": min(lons), "lon_max": max(lons),
             "statuses": seen}

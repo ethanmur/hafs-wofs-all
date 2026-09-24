@@ -193,6 +193,77 @@ class _FakeMonkeypatch:
             setattr(obj, name, value)
 
 
+def test_from_yaml_init_range_is_optional_and_independent_of_window():
+    with tempfile.TemporaryDirectory() as tmp:
+        base = {"best_track": "/tmp/bt.dat", "valid_start": 2024070800,
+                "valid_end": 2024071000,
+                "domain": [15.0, 42.0, -100.0, -60.0]}
+        plain = Path(tmp) / "plain.yaml"
+        plain.write_text(yaml.safe_dump(base))
+        case = from_yaml(plain)
+        assert case.init_start is None and case.init_end is None
+
+        # init_start may precede valid_start to reach long lead times
+        ranged = Path(tmp) / "ranged.yaml"
+        ranged.write_text(yaml.safe_dump({**base, "init_start": 2024070500}))
+        case = from_yaml(ranged)
+        assert case.init_start == datetime(2024, 7, 5, 0)
+        assert case.init_end == datetime(2024, 7, 10, 0)   # defaults to window
+
+
+def test_from_yaml_rejects_impossible_init_range():
+    with tempfile.TemporaryDirectory() as tmp:
+        base = {"best_track": "/tmp/bt.dat", "valid_start": 2024070800,
+                "valid_end": 2024071000,
+                "domain": [15.0, 42.0, -100.0, -60.0]}
+        for bad in ({"init_start": 2024070500, "init_end": 2024070400},
+                    {"init_start": 2024071200},          # after valid_end
+                    {"init_start": "not-a-time"}):
+            path = Path(tmp) / "bad.yaml"
+            path.write_text(yaml.safe_dump({**base, **bad}))
+            try:
+                from_yaml(path)
+            except ValueError:
+                continue
+            raise AssertionError(f"expected ValueError for {bad}")
+
+
+def test_from_yaml_grid_and_wofs_domain():
+    with tempfile.TemporaryDirectory() as tmp:
+        base = {"best_track": "/tmp/bt.dat", "valid_start": 2024070800,
+                "valid_end": 2024071000,
+                "domain": [15.0, 42.0, -100.0, -60.0]}
+        plain = Path(tmp) / "plain.yaml"
+        plain.write_text(yaml.safe_dump(base))
+        case = from_yaml(plain)
+        assert case.grid.res_km == 6.0 and case.grid.pad_km == 750.0
+        assert case.wofs_domain is None
+
+        full = Path(tmp) / "full.yaml"
+        full.write_text(yaml.safe_dump({
+            **base, "wofs_domain": [31.5, 39.5, -87.0, -78.0],
+            "verification_grid": {"res_km": 5.0, "pad_km": 900.0}}))
+        case = from_yaml(full)
+        assert case.wofs_domain == (31.5, 39.5, -87.0, -78.0)
+        assert case.grid.res_km == 5.0 and case.grid.pad_km == 900.0
+        assert case.grid.grid_name == "lambert5km"
+
+
+def test_from_yaml_reports_bad_grid_block_with_the_file():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "bad.yaml"
+        path.write_text(yaml.safe_dump({
+            "best_track": "/tmp/bt.dat", "valid_start": 2024070800,
+            "valid_end": 2024071000, "domain": [15.0, 42.0, -100.0, -60.0],
+            "verification_grid": {"pad_km": 100.0}}))
+        try:
+            from_yaml(path)
+        except ValueError as err:
+            assert "pad_km" in str(err) and "bad.yaml" in str(err)
+            return
+        raise AssertionError("expected ValueError")
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

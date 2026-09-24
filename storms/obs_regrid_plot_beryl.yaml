@@ -21,6 +21,34 @@ skip_mrms: false
 skip_stage4: false
 skip_aorc: false
 
+# Model cycles to pull and verify. Independent of the scoring window above:
+# init_start may sit days before valid_start to reach long lead times, while
+# the statistics -- and the verification grid -- still cover valid_start to
+# valid_end only. init_end defaults to valid_end, since a cycle initialized
+# after the window ends scores nothing.
+# init_start: 2024070500
+# init_end:   2024071000
+
+# WoFS domain for this case, used as a statistics mask (not as the grid) so
+# HAFS can still be scored outside it. Omit for cases with no WoFS run.
+# wofs_domain: [31.5, 39.5, -87.0, -78.0]
+
+# Common verification grid: Lambert conformal at a constant km spacing, built
+# from the best track inside the valid window. All values below are defaults.
+#   pad_km          how far the GRID extends past the trimmed track
+#   mask_radius_km  how far the STATISTICS swath extends from the track
+# pad_km is the larger of the two on purpose: a forecast initialized days out
+# can be several hundred km off track, and rain falling outside the grid is
+# silently uncounted -- which loses false alarms while keeping misses.
+# verification_grid:
+#   res_km: 6.0
+#   pad_km: 750.0
+#   mask_radius_km: 500.0
+#   margin_h: 6          # track points kept either side of the valid window
+#   max_cells: 800       # build aborts above this in Nx or Ny
+#   # std_parallels: [20, 45]
+#   # domain_override: [lat_min, lat_max, lon_min, lon_max]
+
 # MET regridding (regrid-obs). Each obs hour is regridded once onto the grid
 # of grid_template -- any GRIB file on the target grid; the first glob match
 # is used and its grid copied into cache_dir. Needs `module load met/12.2.0`.

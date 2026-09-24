@@ -39,7 +39,8 @@ from hafs_common import (
     QPF_LEVELS, discover_files, haversine_km, read_hafs_tp_records,
 )
 from hafs_case import (
-    cycles_from_yaml, cycle_storm_case, discover_inits, window_hours,
+    cycles_from_yaml, cycle_storm_case, discover_inits, filter_inits,
+    window_hours,
     cycle_eligibility,
 )
 from ets_score import contingency_scores, build_mrms_total_window
@@ -166,11 +167,20 @@ def build_cycle_fields(ccase):
     matching parent, MRMS, and optional Stage IV accumulations. Raises when no
     cycle is eligible or every eligible cycle fails field extraction.
     """
-    init_strs = ccase.inits or discover_inits(ccase.run_root)
-    if not init_strs:
+    found = ccase.inits or discover_inits(ccase.run_root)
+    if not found:
         raise RuntimeError(
             f"No YYYYMMDDHH cycle directories under {ccase.run_root} "
             f"and no 'inits' list given.")
+    init_strs = filter_inits(found, ccase.init_start, ccase.init_end)
+    if not init_strs:
+        raise RuntimeError(
+            f"No cycles left after the init_start/init_end filter "
+            f"({ccase.init_start} to {ccase.init_end}); found: "
+            f"{', '.join(found)}")
+    if len(init_strs) != len(found):
+        print(f"init filter: {len(found)} -> {len(init_strs)} cycles "
+              f"({ccase.init_start} to {ccase.init_end})")
     print(f"Window {ccase.valid_start:%Y-%m-%d %HZ} -> "
           f"{ccase.valid_end:%Y-%m-%d %HZ} | candidate inits: "
           f"{', '.join(init_strs)}")

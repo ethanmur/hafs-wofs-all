@@ -85,7 +85,7 @@ def read_storm_list(path):
 
 def print_inventory(bdeck_dir, storms):
     """Summarise each storm's b-deck: extent, status codes, fix count."""
-    print(f"\n{'storm':<14}{'b-deck':<16}{'fixes':>6}  "
+    print(f"\n{'storm':<12}{'name':<12}{'b-deck':<16}{'fixes':>6}  "
           f"{'first':<15}{'last':<15}{'lat':<13}{'lon':<17}statuses")
     for storm in storms:
         try:
@@ -94,14 +94,15 @@ def print_inventory(bdeck_dir, storms):
             continue
         path = bdeck_dir / name
         if not path.exists():
-            print(f"  {storm:<12}{name:<16}{'-':>6}  (not on disk)")
+            print(f"  {storm:<10}{'-':<12}{name:<16}{'-':>6}  (not on disk)")
             continue
         try:
             info = bdeck_summary(path)
         except (OSError, ValueError) as err:
-            print(f"  {storm:<12}{name:<16}{'-':>6}  UNREADABLE: {err}")
+            print(f"  {storm:<10}{'-':<12}{name:<16}{'-':>6}  "
+                  f"UNREADABLE: {err}")
             continue
-        print(f"  {storm:<12}{name:<16}{info['n']:>6}  "
+        print(f"  {storm:<10}{info['name']:<12}{name:<16}{info['n']:>6}  "
               f"{info['first']:%Y-%m-%d %HZ} {info['last']:%Y-%m-%d %HZ} "
               f"{info['lat_min']:5.1f}-{info['lat_max']:5.1f}  "
               f"{info['lon_min']:7.1f}-{info['lon_max']:7.1f}  "

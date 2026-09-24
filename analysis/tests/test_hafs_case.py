@@ -14,7 +14,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 FIX = Path(__file__).resolve().parent / "fixtures"
 
 import numpy as np
-from hafs_case import decode_latlon, parse_atcfunix, parse_atcfunix_fixes, normalize_storm_id, detect_model, auto_domain, StormCase, from_yaml, find_atcfunix, position_on_track
+from hafs_case import (decode_latlon, parse_atcfunix,
+                       parse_atcfunix_fixes, normalize_storm_id,
+                       detect_model, auto_domain, StormCase,
+                       from_yaml, find_atcfunix,
+                       position_on_track, filter_inits,
+                       cycles_from_yaml)
 
 
 def test_decode_latlon():
@@ -339,6 +344,53 @@ def test_find_atcfunix_falls_back_to_all_for_multistorm():
         assert chosen.name == f"{base}.parent.trak.atcfunix.all", chosen
     finally:
         shutil.rmtree(tmpdir)
+
+
+_INITS = ["2024070500", "2024070512", "2024070600", "2024070812",
+          "2024071000", "2024071100"]
+
+
+def test_filter_inits_unbounded_is_a_passthrough():
+    assert filter_inits(_INITS) == _INITS
+
+
+def test_filter_inits_bounds_are_inclusive():
+    kept = filter_inits(_INITS, datetime(2024, 7, 5, 12),
+                        datetime(2024, 7, 10, 0))
+    assert kept == ["2024070512", "2024070600", "2024070812", "2024071000"]
+
+
+def test_filter_inits_drops_unparseable_names():
+    assert filter_inits(["2024070500", "latest", "scratch"],
+                        datetime(2024, 7, 1), None) == ["2024070500"]
+
+
+def test_cycles_from_yaml_init_range():
+    import tempfile
+    import yaml as _yaml
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "HFSA"
+        root.mkdir()
+        base = {"run_root": str(root), "valid_start": 2024070800,
+                "valid_end": 2024071000, "domain": [20.0, 40.0, -95.0, -80.0],
+                "model_label": "HFSA"}
+        path = Path(tmp) / "cycles.yaml"
+        path.write_text(_yaml.safe_dump(base))
+        ccase = cycles_from_yaml(path)
+        assert ccase.init_start is None and ccase.init_end is None
+
+        path.write_text(_yaml.safe_dump({**base, "init_start": 2024070500}))
+        ccase = cycles_from_yaml(path)
+        assert ccase.init_start == datetime(2024, 7, 5, 0)
+        assert ccase.init_end == datetime(2024, 7, 10, 0)  # defaults to window
+
+        path.write_text(_yaml.safe_dump({**base, "init_start": 2024070500,
+                                         "init_end": 2024070400}))
+        try:
+            cycles_from_yaml(path)
+        except ValueError:
+            return
+        raise AssertionError("expected ValueError for init_end < init_start")
 
 
 def _run_all():

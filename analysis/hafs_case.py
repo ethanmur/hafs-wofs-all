@@ -407,6 +407,8 @@ class CyclesCase:
     stage4_cache_dir: Path
     inits: list            # explicit YYYYMMDDHH strings, or None to discover
     case_slug: str
+    init_start: datetime = None   # earliest cycle to pull; None = no bound
+    init_end: datetime = None     # latest cycle to pull; None = valid_end
     landfall_time: datetime = None
     ets_bar_thresholds_in: list = field(
         default_factory=lambda: list(range(2, 25, 2)))
@@ -428,6 +430,29 @@ class CyclesCase:
         """YAML stem + window, so different windows never overwrite output."""
         return (f"{self.case_slug}_{self.valid_start:%Y%m%d%H}_"
                 f"{self.valid_end:%Y%m%d%H}")
+
+
+def filter_inits(init_strs, init_start=None, init_end=None):
+    """Keep the YYYYMMDDHH cycles inside [init_start, init_end], inclusive.
+
+    The cycle range is independent of the scoring window: init_start may sit
+    well before valid_start to reach long lead times. Unparseable names are
+    dropped, matching discover_inits.
+    """
+    if init_start is None and init_end is None:
+        return list(init_strs)
+    kept = []
+    for init_str in init_strs:
+        try:
+            init_dt = datetime.strptime(str(init_str), "%Y%m%d%H")
+        except ValueError:
+            continue
+        if init_start is not None and init_dt < init_start:
+            continue
+        if init_end is not None and init_dt > init_end:
+            continue
+        kept.append(init_str)
+    return kept
 
 
 def discover_inits(run_root):
@@ -470,6 +495,19 @@ def cycle_eligibility(init_dt, max_fhour, valid_start, valid_end):
     return True, ""
 
 
+def _cycles_stamp(value, key, yaml_path):
+    """Optional YYYYMMDDHH (or YYYYMMDDHHMM) timestamp from a YAML value."""
+    if value in (None, ""):
+        return None
+    text = str(value)
+    fmt = "%Y%m%d%H%M" if len(text) == 12 else "%Y%m%d%H"
+    try:
+        return datetime.strptime(text, fmt)
+    except ValueError:
+        raise ValueError(f"'{key}' must be YYYYMMDDHH in {yaml_path}, "
+                         f"got {value!r}") from None
+
+
 def cycles_from_yaml(yaml_path):
     """Load a CyclesCase from a cycles YAML (run_root/valid_start/valid_end
     and domain required)."""
@@ -494,6 +532,12 @@ def cycles_from_yaml(yaml_path):
     run_root = Path(cfg["run_root"])
     out_dir = (Path(cfg["out_dir"]) if cfg.get("out_dir")
                else Path("analysis/output") / yaml_path.stem)
+    init_start = _cycles_stamp(cfg.get("init_start"), "init_start", yaml_path)
+    init_end = _cycles_stamp(cfg.get("init_end"), "init_end", yaml_path)
+    if init_start is not None and init_end is None:
+        init_end = valid_end          # cycles past the window score nothing
+    if init_start is not None and init_end <= init_start:
+        raise ValueError(f"init_end must be after init_start in {yaml_path}")
     landfall_raw = cfg.get("landfall_time")
     landfall_time = None
     if landfall_raw:
@@ -519,6 +563,8 @@ def cycles_from_yaml(yaml_path):
                                       "/tmp/stage4_cache")),
         inits=[str(i) for i in cfg["inits"]] if cfg.get("inits") else None,
         case_slug=yaml_path.stem,
+        init_start=init_start,
+        init_end=init_end,
         storm_id=cfg.get("storm_id"),
         landfall_time=landfall_time,
         ets_bar_thresholds_in=[float(v) for v in cfg.get(

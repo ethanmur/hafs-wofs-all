@@ -30,6 +30,7 @@ import boto3
 from hafs_common import load_mrms_hour, mrms_s3_key
 import aorc_common
 import met_regrid
+import verification_grid
 import stage4_hourly
 
 
@@ -55,11 +56,31 @@ class ObsCase:
     regrid: Optional[met_regrid.RegridConfig] = None
     regrid_plot_dir: Optional[Path] = None   # plot-regrid output root
     zoom_domain: Optional[tuple] = None      # (lat_min, lat_max, lon_min, lon_max)
+    # Model cycles to pull and verify. Independent of the scoring window:
+    # init_start may precede valid_start to reach long lead times, and the
+    # verification grid still follows the valid window, not init_start.
+    init_start: Optional[datetime] = None
+    init_end: Optional[datetime] = None
+    wofs_domain: Optional[tuple] = None      # (lat_min, lat_max, lon_min, lon_max)
+    grid: Optional[verification_grid.GridConfig] = None
 
     @property
     def output_slug(self):
         return (f"{self.case_slug}_{self.valid_start:%Y%m%d%H}_"
                 f"{self.valid_end:%Y%m%d%H}")
+
+
+def _parse_stamp(value, key, yaml_path):
+    """Optional YYYYMMDDHH (or YYYYMMDDHHMM) timestamp from a YAML value."""
+    if value in (None, ""):
+        return None
+    text = str(value)
+    fmt = "%Y%m%d%H%M" if len(text) == 12 else "%Y%m%d%H"
+    try:
+        return datetime.strptime(text, fmt)
+    except ValueError:
+        raise ValueError(f"'{key}' must be YYYYMMDDHH in {yaml_path}, "
+                         f"got {value!r}") from None
 
 
 def from_yaml(yaml_path):
@@ -76,6 +97,22 @@ def from_yaml(yaml_path):
     valid_end = datetime.strptime(str(cfg["valid_end"]), "%Y%m%d%H")
     if valid_end <= valid_start:
         raise ValueError(f"valid_end must be after valid_start in {yaml_path}")
+    init_start = _parse_stamp(cfg.get("init_start"), "init_start", yaml_path)
+    init_end = _parse_stamp(cfg.get("init_end"), "init_end", yaml_path)
+    if init_start is not None and init_end is None:
+        init_end = valid_end          # cycles past the window score nothing
+    if init_start is not None and init_end <= init_start:
+        raise ValueError(f"init_end must be after init_start in {yaml_path}")
+    if init_start is not None and init_start > valid_end:
+        raise ValueError(f"init_start is after valid_end in {yaml_path}; no "
+                         "cycle initialized then can reach the window")
+    try:
+        grid = verification_grid.grid_config_from_dict(
+            cfg.get("verification_grid"))
+        wofs_domain = verification_grid._domain_tuple(cfg.get("wofs_domain"),
+                                                      "wofs_domain")
+    except ValueError as err:
+        raise ValueError(f"{err} in {yaml_path}") from None
     plots = cfg.get("regrid_plots") or {}
     zoom = plots.get("zoom_domain")
     if zoom is not None and len(zoom) != 4:
@@ -99,6 +136,10 @@ def from_yaml(yaml_path):
         regrid_plot_dir=(Path(plots["out_dir"]) if plots.get("out_dir")
                          else out_dir / "regrid"),
         zoom_domain=tuple(float(v) for v in zoom) if zoom else None,
+        init_start=init_start,
+        init_end=init_end,
+        wofs_domain=wofs_domain,
+        grid=grid,
     )
 
 
