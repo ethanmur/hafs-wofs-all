@@ -5,7 +5,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 FIX = Path(__file__).resolve().parent / "fixtures"
 
-from best_track import parse_bdeck, parse_bdeck_fixes
+from best_track import (parse_bdeck, parse_bdeck_fixes,
+                        parse_bdeck_status, bdeck_summary)
 
 
 def test_parse_bdeck_times_from_column_and_dedup():
@@ -40,6 +41,25 @@ def test_parse_bdeck_fixes_reads_rmw_nautical_miles():
     fixes = parse_bdeck_fixes(p)
     assert len(fixes) == 1
     assert fixes[0][3] == 25 * 1.852
+
+
+def test_parse_bdeck_status_keeps_every_stage():
+    track = parse_bdeck_status(FIX / "bal022024_tail.dat")
+    # 6 lines, the first two share 2024070900 -> 5 unique fixes.
+    assert len(track) == 5
+    assert [s for _, _, _, s in track] == ["HU", "TS", "TD", "LO", "EX"]
+    assert track[-1][0] == datetime(2024, 7, 10, 0)
+
+
+def test_bdeck_summary_reports_extent_and_statuses():
+    info = bdeck_summary(FIX / "bal022024_tail.dat")
+    assert info["n"] == 5
+    assert info["first"] == datetime(2024, 7, 9, 0)
+    assert info["last"] == datetime(2024, 7, 10, 0)
+    assert info["lat_min"] == 32.0 and info["lat_max"] == 43.1
+    assert info["lon_min"] == -95.0 and info["lon_max"] == -78.6
+    # remnant-low and extratropical stages must survive into the extent
+    assert info["statuses"] == ["HU", "TS", "TD", "LO", "EX"]
 
 
 def _run_all():

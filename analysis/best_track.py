@@ -75,6 +75,7 @@ def parse_bdeck_full(path):
                 continue
             row = {
                 "t": t, "lat": lat, "lon": lon,
+                "status": cols[10] if len(cols) > 10 else "",
                 "vmax_kt": _optional_value(cols, 8),
                 "mslp_hpa": _optional_value(cols, 9),
                 "rmw_km": _rmw_km(cols),
@@ -82,10 +83,38 @@ def parse_bdeck_full(path):
             if t not in by_time:
                 by_time[t] = row
             else:
-                for key in ("vmax_kt", "mslp_hpa", "rmw_km"):
-                    if by_time[t][key] is None and row[key] is not None:
+                for key in ("status", "vmax_kt", "mslp_hpa", "rmw_km"):
+                    if not by_time[t][key] and row[key]:
                         by_time[t][key] = row[key]
     track = [by_time[t] for t in sorted(by_time)]
     if not track:
         raise ValueError(f"No BEST fixes parsed from {path}")
     return track
+
+
+def parse_bdeck_status(path):
+    """Return [(valid_dt, lat, lon, status), ...] from a b-deck.
+
+    Every ATCF status code is kept -- TD/TS/HU for the tropical phase, but
+    also EX (extratropical), SD/SS (subtropical), LO (remnant low) and DB
+    (disturbance). Post-landfall and remnant stages are precisely the ones
+    that matter for inland rainfall verification, so filtering to TS/HU here
+    would silently truncate the track the verification grid is built from.
+    """
+    return [(r["t"], r["lat"], r["lon"], r["status"])
+            for r in parse_bdeck_full(path)]
+
+
+def bdeck_summary(path):
+    """Track extent and status mix for one b-deck, for inventory reporting."""
+    track = parse_bdeck_status(path)
+    lats = [lat for _, lat, _, _ in track]
+    lons = [lon for _, _, lon, _ in track]
+    seen = []
+    for _, _, _, status in track:
+        if status and status not in seen:
+            seen.append(status)
+    return {"n": len(track), "first": track[0][0], "last": track[-1][0],
+            "lat_min": min(lats), "lat_max": max(lats),
+            "lon_min": min(lons), "lon_max": max(lons),
+            "statuses": seen}
