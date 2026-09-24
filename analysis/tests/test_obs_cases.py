@@ -228,6 +228,24 @@ def test_from_yaml_rejects_impossible_init_range():
             raise AssertionError(f"expected ValueError for {bad}")
 
 
+def test_from_yaml_multiple_wofs_domains():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "multi.yaml"
+        path.write_text(yaml.safe_dump({
+            "best_track": "/tmp/bt.dat", "valid_start": 2024070800,
+            "valid_end": 2024071000, "domain": [15.0, 42.0, -100.0, -60.0],
+            "wofs_domains": [
+                {"name": "wofs_tx", "domain": [26.0, 32.0, -99.0, -93.0],
+                 "valid_start": 2024070800, "valid_end": 2024070812},
+                {"name": "wofs_oh", "domain": [36.0, 42.0, -89.0, -83.0],
+                 "valid_start": 2024070918, "valid_end": 2024071006}]}))
+        case = from_yaml(path)
+        assert [d.name for d in case.wofs_domains] == ["wofs_tx", "wofs_oh"]
+        assert case.wofs_domains[0].valid_end == datetime(2024, 7, 8, 12)
+        # the convenience property is the union extent of all deployments
+        assert case.wofs_domain == (26.0, 42.0, -99.0, -83.0)
+
+
 def test_from_yaml_grid_and_wofs_domain():
     with tempfile.TemporaryDirectory() as tmp:
         base = {"best_track": "/tmp/bt.dat", "valid_start": 2024070800,

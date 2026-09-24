@@ -14,7 +14,7 @@ Usage:
 import csv
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -61,26 +61,24 @@ class ObsCase:
     # verification grid still follows the valid window, not init_start.
     init_start: Optional[datetime] = None
     init_end: Optional[datetime] = None
-    wofs_domain: Optional[tuple] = None      # (lat_min, lat_max, lon_min, lon_max)
+    # WoFS deployments for this case; each keeps its own time window, since
+    # WoFS is re-sited between events and a storm can have several.
+    wofs_domains: list = field(default_factory=list)
     grid: Optional[verification_grid.GridConfig] = None
+
+    @property
+    def wofs_domain(self):
+        """Union extent of every WoFS deployment, or None if there are none."""
+        if not self.wofs_domains:
+            return None
+        boxes = [d.domain for d in self.wofs_domains]
+        return (min(b[0] for b in boxes), max(b[1] for b in boxes),
+                min(b[2] for b in boxes), max(b[3] for b in boxes))
 
     @property
     def output_slug(self):
         return (f"{self.case_slug}_{self.valid_start:%Y%m%d%H}_"
                 f"{self.valid_end:%Y%m%d%H}")
-
-
-def _parse_stamp(value, key, yaml_path):
-    """Optional YYYYMMDDHH (or YYYYMMDDHHMM) timestamp from a YAML value."""
-    if value in (None, ""):
-        return None
-    text = str(value)
-    fmt = "%Y%m%d%H%M" if len(text) == 12 else "%Y%m%d%H"
-    try:
-        return datetime.strptime(text, fmt)
-    except ValueError:
-        raise ValueError(f"'{key}' must be YYYYMMDDHH in {yaml_path}, "
-                         f"got {value!r}") from None
 
 
 def from_yaml(yaml_path):
@@ -97,8 +95,10 @@ def from_yaml(yaml_path):
     valid_end = datetime.strptime(str(cfg["valid_end"]), "%Y%m%d%H")
     if valid_end <= valid_start:
         raise ValueError(f"valid_end must be after valid_start in {yaml_path}")
-    init_start = _parse_stamp(cfg.get("init_start"), "init_start", yaml_path)
-    init_end = _parse_stamp(cfg.get("init_end"), "init_end", yaml_path)
+    init_start = verification_grid.parse_stamp(
+        cfg.get("init_start"), "init_start", yaml_path)
+    init_end = verification_grid.parse_stamp(
+        cfg.get("init_end"), "init_end", yaml_path)
     if init_start is not None and init_end is None:
         init_end = valid_end          # cycles past the window score nothing
     if init_start is not None and init_end <= init_start:
@@ -109,8 +109,7 @@ def from_yaml(yaml_path):
     try:
         grid = verification_grid.grid_config_from_dict(
             cfg.get("verification_grid"))
-        wofs_domain = verification_grid._domain_tuple(cfg.get("wofs_domain"),
-                                                      "wofs_domain")
+        wofs_domains = verification_grid.wofs_domains_from_cfg(cfg, yaml_path)
     except ValueError as err:
         raise ValueError(f"{err} in {yaml_path}") from None
     plots = cfg.get("regrid_plots") or {}
@@ -138,7 +137,7 @@ def from_yaml(yaml_path):
         zoom_domain=tuple(float(v) for v in zoom) if zoom else None,
         init_start=init_start,
         init_end=init_end,
-        wofs_domain=wofs_domain,
+        wofs_domains=wofs_domains,
         grid=grid,
     )
 

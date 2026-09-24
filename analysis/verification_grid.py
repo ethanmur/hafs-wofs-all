@@ -62,6 +62,105 @@ def _domain_tuple(value, key):
     return (lat0, lat1, lon0, lon1)
 
 
+def parse_stamp(value, key, where=""):
+    """Optional YYYYMMDDHH (or YYYYMMDDHHMM) timestamp from a YAML value."""
+    from datetime import datetime
+    if value in (None, ""):
+        return None
+    text = str(value)
+    fmt = "%Y%m%d%H%M" if len(text) == 12 else "%Y%m%d%H"
+    try:
+        return datetime.strptime(text, fmt)
+    except ValueError:
+        suffix = f" in {where}" if where else ""
+        raise ValueError(f"'{key}' must be YYYYMMDDHH{suffix}, "
+                         f"got {value!r}") from None
+
+
+@dataclass
+class WofsDomain:
+    """One WoFS deployment: a box, and the period it was actually running.
+
+    WoFS is re-sited between events, so a storm can have several deployments
+    in different places on different days. The grid takes the union of them,
+    but each stays a separate statistics mask applied only inside its own time
+    window -- masking day-3 statistics with a box that was live on day 1 would
+    score HAFS in a region WoFS never covered.
+    """
+    domain: tuple                  # (lat_min, lat_max, lon_min, lon_max)
+    name: str = "wofs"
+    valid_start: Optional[object] = None    # datetime, or None for always-on
+    valid_end: Optional[object] = None
+
+    def covers(self, when):
+        """Is this deployment live at `when`? Untimed boxes always are."""
+        if self.valid_start is not None and when < self.valid_start:
+            return False
+        if self.valid_end is not None and when > self.valid_end:
+            return False
+        return True
+
+    @property
+    def label(self):
+        if self.valid_start is None and self.valid_end is None:
+            return self.name
+        lo = f"{self.valid_start:%m-%d %HZ}" if self.valid_start else "..."
+        hi = f"{self.valid_end:%m-%d %HZ}" if self.valid_end else "..."
+        return f"{self.name}  {lo}-{hi}"
+
+
+def wofs_domains_from_cfg(cfg, where=""):
+    """Read `wofs_domains:` (a list) or the `wofs_domain:` shorthand.
+
+    A list entry is either a bare [lat_min, lat_max, lon_min, lon_max] box or
+    a mapping with `domain` plus optional `name`, `valid_start`, `valid_end`.
+    """
+    cfg = cfg or {}
+    if "wofs_domains" in cfg and "wofs_domain" in cfg:
+        raise ValueError("give either wofs_domain or wofs_domains, not both")
+    if cfg.get("wofs_domain") is not None:
+        return [WofsDomain(domain=_domain_tuple(cfg["wofs_domain"],
+                                                "wofs_domain"))]
+    entries = cfg.get("wofs_domains") or []
+    if isinstance(entries, dict):
+        entries = [entries]
+    out = []
+    for i, entry in enumerate(entries, start=1):
+        default_name = f"wofs_{i}"
+        if isinstance(entry, dict):
+            unknown = set(entry) - {"domain", "name", "valid_start",
+                                    "valid_end"}
+            if unknown:
+                raise ValueError("unknown wofs_domains keys: "
+                                 + ", ".join(sorted(unknown)))
+            if "domain" not in entry:
+                raise ValueError(f"wofs_domains[{i}] needs a 'domain'")
+            box = _domain_tuple(entry["domain"], f"wofs_domains[{i}].domain")
+            start = parse_stamp(entry.get("valid_start"),
+                                f"wofs_domains[{i}].valid_start", where)
+            end = parse_stamp(entry.get("valid_end"),
+                              f"wofs_domains[{i}].valid_end", where)
+            if start is not None and end is not None and end <= start:
+                raise ValueError(f"wofs_domains[{i}] valid_end must be after "
+                                 "valid_start")
+            out.append(WofsDomain(domain=box,
+                                  name=str(entry.get("name", default_name)),
+                                  valid_start=start, valid_end=end))
+        else:
+            out.append(WofsDomain(
+                domain=_domain_tuple(entry, f"wofs_domains[{i}]"),
+                name=default_name))
+    names = [d.name for d in out]
+    if len(set(names)) != len(names):
+        raise ValueError(f"duplicate wofs_domains names: {names}")
+    return out
+
+
+def active_domains(domains, when):
+    """The deployments live at a given valid time."""
+    return [d for d in domains if d.covers(when)]
+
+
 def grid_config_from_dict(cfg):
     """Build a GridConfig from a YAML `verification_grid:` block.
 
@@ -210,13 +309,33 @@ def trim_track(track, valid_start, valid_end, margin_h):
     return [p for p in track if lo <= p[0] <= hi]
 
 
-def _bbox(points, wofs_domain=None):
-    """(lat_min, lat_max, lon_min, lon_max) over track points and a WoFS box."""
+def _boxes(wofs_domains):
+    """Normalise WofsDomain objects or bare boxes to a list of box tuples."""
+    if not wofs_domains:
+        return []
+    if isinstance(wofs_domains, WofsDomain):
+        wofs_domains = [wofs_domains]
+    elif (len(wofs_domains) == 4
+          and all(isinstance(v, (int, float)) for v in wofs_domains)):
+        wofs_domains = [WofsDomain(domain=tuple(float(v)
+                                                for v in wofs_domains))]
+    return [d.domain if isinstance(d, WofsDomain) else tuple(float(v)
+            for v in d) for d in wofs_domains]
+
+
+def _corners(boxes):
+    """Corner pseudo-fixes (_, lat, lon) for a list of boxes."""
+    return [(None, lat, lon) for box in boxes
+            for lat in box[:2] for lon in box[2:]]
+
+
+def _bbox(points, boxes=()):
+    """(lat_min, lat_max, lon_min, lon_max) over track points and WoFS boxes."""
     lats = [p[1] for p in points]
     lons = [p[2] for p in points]
-    if wofs_domain is not None:
-        lats.extend(wofs_domain[:2])
-        lons.extend(wofs_domain[2:])
+    for box in boxes:
+        lats.extend(box[:2])
+        lons.extend(box[2:])
     if not lats:
         raise ValueError("no positions to bound")
     return (min(lats), max(lats), min(lons), max(lons))
@@ -246,36 +365,37 @@ def derive_projection(bbox):
             "lat_1": round(lat_1, 4), "lat_2": round(lat_2, 4)}
 
 
-def build_grid(track, cfg, wofs_domain=None, name=None):
+def build_grid(track, cfg, wofs_domains=None, name=None):
     """Build a GridSpec from already-trimmed track points.
+
+    Every WoFS deployment is unioned into the extent, so one grid per storm
+    covers all of them; their time windows matter only for masking later.
 
     Domain precedence, reported in GridSpec.rule:
       1. cfg.domain_override
-      2. trimmed track + cfg.pad_km, unioned with the WoFS box
-      3. WoFS box + cfg.pad_km alone, when no track point survives the window
+      2. trimmed track + cfg.pad_km, unioned with the WoFS boxes
+      3. WoFS boxes + cfg.pad_km alone, when no track point survives the window
     """
     import numpy as np
+    boxes = _boxes(wofs_domains)
     if cfg.domain_override is not None:
         rule = "domain_override"
         box = cfg.domain_override
-        corners = [(0, lat, lon) for lat in box[:2] for lon in box[2:]]
+        corners = _corners([box])
         pad_km = 0.0
     elif track:
-        rule = "track+wofs" if wofs_domain is not None else "track"
-        corners = list(track)
-        box = _bbox(track, wofs_domain)
-        if wofs_domain is not None:
-            corners += [(0, lat, lon) for lat in wofs_domain[:2]
-                        for lon in wofs_domain[2:]]
+        rule = "track+wofs" if boxes else "track"
+        corners = list(track) + _corners(boxes)
+        box = _bbox(track, boxes)
         pad_km = cfg.pad_km
-    elif wofs_domain is not None:
+    elif boxes:
         rule = "wofs-only"
-        box = wofs_domain
-        corners = [(0, lat, lon) for lat in box[:2] for lon in box[2:]]
+        box = _bbox([], boxes)
+        corners = _corners(boxes)
         pad_km = cfg.pad_km
     else:
         raise ValueError(
-            "no track points inside the valid window and no wofs_domain or "
+            "no track points inside the valid window and no wofs_domains or "
             "domain_override given; nothing to build a grid from")
 
     # Pick the projection from the padded geographic extent, so the standard
@@ -390,7 +510,7 @@ def _grid_outline(lat, lon):
             np.concatenate([e[1] for e in edges]))
 
 
-def plot_grid(spec, track, out_path, cfg, wofs_domain=None, title=None,
+def plot_grid(spec, track, out_path, cfg, wofs_domains=None, title=None,
               report=None):
     """A3 sanity map: grid outline, best track by status, swath, WoFS box."""
     import matplotlib
@@ -459,21 +579,31 @@ def plot_grid(spec, track, out_path, cfg, wofs_domain=None, title=None,
         if st0 not in seen:
             seen.append(st0)
 
-    if wofs_domain is not None:
-        wlat0, wlat1, wlon0, wlon1 = wofs_domain
+    domains = (wofs_domains if isinstance(wofs_domains, list)
+               else ([wofs_domains] if wofs_domains else []))
+    domains = [d if isinstance(d, WofsDomain) else WofsDomain(domain=tuple(d))
+               for d in domains]
+    for dom in domains:
+        wlat0, wlat1, wlon0, wlon1 = dom.domain
         ax.add_patch(Rectangle(
             (wlon0, wlat0), wlon1 - wlon0, wlat1 - wlat0, transform=plain,
             facecolor="none", edgecolor="#cc79a7", linewidth=1.6,
             linestyle="--", zorder=8))
+        ax.text(wlon0, wlat1, f" {dom.label}", transform=plain, fontsize=7.5,
+                color="#cc79a7", va="bottom", ha="left", zorder=9,
+                bbox=dict(boxstyle="square,pad=0.15", facecolor="white",
+                          edgecolor="none", alpha=0.75))
 
     handles = [Line2D([], [], color="#444444", linewidth=2.4,
                       label=f"grid {spec.nx}x{spec.ny} @ {spec.res_km:g} km"),
                Patch(facecolor="#0072b2", alpha=0.10, edgecolor="#0072b2",
                      linestyle="--",
                      label=f"swath {cfg.mask_radius_km:g} km")]
-    if wofs_domain is not None:
+    if domains:
+        label = ("WoFS domain" if len(domains) == 1
+                 else f"WoFS domains ({len(domains)})")
         handles.append(Line2D([], [], color="#cc79a7", linewidth=1.6,
-                              linestyle="--", label="WoFS domain"))
+                              linestyle="--", label=label))
     handles += [Line2D([], [], color=STATUS_COLORS.get(s, "#888888"),
                        linewidth=2.2,
                        label=STATUS_LABELS.get(s, s))
@@ -522,7 +652,11 @@ def build_grid_case(case):
               f"{track[-1][0]:%Y-%m-%d %HZ}  "
               f"statuses {','.join(dict.fromkeys(p[3] for p in track))}")
 
-    spec = build_grid(track, cfg, wofs_domain=case.wofs_domain)
+    domains = case.wofs_domains
+    if domains:
+        print(f"WoFS   : {len(domains)} deployment(s): "
+              + "; ".join(d.label for d in domains))
+    spec = build_grid(track, cfg, wofs_domains=domains)
     lat, lon = grid_latlon(spec)
     report = spacing_report(spec, lat, lon)
 
@@ -550,13 +684,18 @@ def build_grid_case(case):
         "margin_h": cfg.margin_h,
         "pad_km": cfg.pad_km,
         "mask_radius_km": cfg.mask_radius_km,
-        "wofs_domain": list(case.wofs_domain) if case.wofs_domain else None,
+        "wofs_domains": [
+            {"name": d.name, "domain": list(d.domain),
+             "valid_start": (f"{d.valid_start:%Y%m%d%H}"
+                             if d.valid_start else None),
+             "valid_end": f"{d.valid_end:%Y%m%d%H}" if d.valid_end else None}
+            for d in domains],
         "track_fixes_in_window": len(track),
     })
     json_path = write_grid_json(out_dir / f"{case.case_slug}_grid.json",
                                payload)
     png_path = plot_grid(spec, track, out_dir / f"{case.case_slug}_grid.png",
-                         cfg, wofs_domain=case.wofs_domain,
+                         cfg, wofs_domains=domains,
                          title=f"{case.storm_name} — verification grid",
                          report=report)
     print(f"Wrote  : {json_path}")

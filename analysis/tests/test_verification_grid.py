@@ -13,6 +13,8 @@ from verification_grid import (GridConfig, grid_config_from_dict,
                                trim_track, derive_projection,
                                build_grid, grid_latlon,
                                spacing_report, grid_to_dict,
+                               wofs_domains_from_cfg,
+                               active_domains, WofsDomain,
                                R_EARTH_KM)
 
 
@@ -172,7 +174,8 @@ def test_build_grid_unions_the_wofs_box():
     cfg = grid_config_from_dict({})
     track = _track(range(0, 25, 6))
     plain = build_grid(track, cfg)
-    with_wofs = build_grid(track, cfg, wofs_domain=(40.0, 46.0, -80.0, -74.0))
+    with_wofs = build_grid(track, cfg,
+                           wofs_domains=(40.0, 46.0, -80.0, -74.0))
     assert with_wofs.rule == "track+wofs"
     assert with_wofs.n_cells > plain.n_cells
     lat, lon = grid_latlon(with_wofs)
@@ -182,7 +185,7 @@ def test_build_grid_unions_the_wofs_box():
 def test_build_grid_domain_override_wins():
     cfg = grid_config_from_dict({"domain_override": [30.0, 36.0, -92.0, -86.0]})
     spec = build_grid(_track(range(0, 49, 6)), cfg,
-                      wofs_domain=(10.0, 12.0, -60.0, -58.0))
+                      wofs_domains=(10.0, 12.0, -60.0, -58.0))
     assert spec.rule == "domain_override"
     lat, lon = grid_latlon(spec)
     # no pad and neither the track nor the WoFS box widen it
@@ -192,7 +195,7 @@ def test_build_grid_domain_override_wins():
 
 def test_build_grid_wofs_only_when_no_track_survives():
     cfg = grid_config_from_dict({})
-    spec = build_grid([], cfg, wofs_domain=(31.0, 39.0, -87.0, -79.0))
+    spec = build_grid([], cfg, wofs_domains=(31.0, 39.0, -87.0, -79.0))
     assert spec.rule == "wofs-only"
     assert spec.nx > 0 and spec.ny > 0
 
@@ -252,6 +255,99 @@ def test_grid_to_dict_carries_the_spec_and_report():
     for key in ("nx", "ny", "met_spec", "proj4", "rule", "spacing_km",
                 "case", "met_lon_west_positive"):
         assert key in payload, key
+
+
+# --- multiple WoFS deployments -------------------------------------------
+
+_WOFS_CFG = {"wofs_domains": [
+    {"name": "wofs_tx", "domain": [26.0, 32.0, -99.0, -93.0],
+     "valid_start": 2024070800, "valid_end": 2024070812},
+    {"name": "wofs_oh", "domain": [36.0, 42.0, -89.0, -83.0],
+     "valid_start": 2024070918, "valid_end": 2024071006},
+]}
+
+
+def test_wofs_domains_list_with_windows():
+    doms = wofs_domains_from_cfg(_WOFS_CFG)
+    assert [d.name for d in doms] == ["wofs_tx", "wofs_oh"]
+    assert doms[0].domain == (26.0, 32.0, -99.0, -93.0)
+    assert doms[0].valid_start == datetime(2024, 7, 8, 0)
+    assert doms[1].valid_end == datetime(2024, 7, 10, 6)
+
+
+def test_wofs_domains_singular_shorthand_still_works():
+    doms = wofs_domains_from_cfg({"wofs_domain": [31.5, 39.5, -87.0, -78.0]})
+    assert len(doms) == 1 and doms[0].name == "wofs"
+    assert doms[0].valid_start is None and doms[0].covers(datetime(1999, 1, 1))
+
+
+def test_wofs_domains_bare_boxes_are_auto_named():
+    doms = wofs_domains_from_cfg({"wofs_domains": [[26.0, 32.0, -99.0, -93.0],
+                                                   [36.0, 42.0, -89.0, -83.0]]})
+    assert [d.name for d in doms] == ["wofs_1", "wofs_2"]
+
+
+def test_wofs_domains_absent_is_empty():
+    assert wofs_domains_from_cfg({}) == []
+    assert wofs_domains_from_cfg(None) == []
+
+
+def test_wofs_domains_rejects_bad_input():
+    for bad in ({"wofs_domain": [1, 2], "wofs_domains": []},
+                {"wofs_domains": [{"name": "a"}]},
+                {"wofs_domains": [{"domain": [1, 2, 3]}]},
+                {"wofs_domains": [{"domain": [26, 32, -99, -93],
+                                   "valid_start": 2024070812,
+                                   "valid_end": 2024070800}]},
+                {"wofs_domains": [{"domain": [26, 32, -99, -93],
+                                   "bogus": 1}]},
+                {"wofs_domains": [{"domain": [26, 32, -99, -93], "name": "a"},
+                                  {"domain": [36, 42, -89, -83], "name": "a"}]}):
+        try:
+            wofs_domains_from_cfg(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"expected ValueError for {bad}")
+
+
+def test_wofs_domain_covers_only_its_own_window():
+    dom = wofs_domains_from_cfg(_WOFS_CFG)[0]
+    assert dom.covers(datetime(2024, 7, 8, 6))
+    # the day-1 Texas box must not mask day-3 statistics in Ohio
+    assert not dom.covers(datetime(2024, 7, 10, 0))
+    assert not dom.covers(datetime(2024, 7, 7, 0))
+
+
+def test_active_domains_selects_by_valid_time():
+    doms = wofs_domains_from_cfg(_WOFS_CFG)
+    assert [d.name for d in active_domains(doms, datetime(2024, 7, 8, 6))] \
+        == ["wofs_tx"]
+    assert [d.name for d in active_domains(doms, datetime(2024, 7, 10, 0))] \
+        == ["wofs_oh"]
+    assert active_domains(doms, datetime(2024, 7, 9, 0)) == []
+
+
+def test_build_grid_unions_every_deployment():
+    cfg = grid_config_from_dict({})
+    track = _track(range(0, 25, 6))
+    doms = wofs_domains_from_cfg(_WOFS_CFG)
+    spec = build_grid(track, cfg, wofs_domains=doms)
+    assert spec.rule == "track+wofs"
+    lat, lon = grid_latlon(spec)
+    # both boxes inside one grid, regardless of their disjoint time windows
+    for box in (d.domain for d in doms):
+        assert lat.min() <= box[0] and lat.max() >= box[1]
+        assert lon.min() <= box[2] and lon.max() >= box[3]
+
+
+def test_build_grid_accepts_a_bare_box_or_single_domain():
+    cfg = grid_config_from_dict({})
+    track = _track(range(0, 25, 6))
+    box = (40.0, 46.0, -80.0, -74.0)
+    a = build_grid(track, cfg, wofs_domains=box)
+    b = build_grid(track, cfg, wofs_domains=[WofsDomain(domain=box)])
+    c = build_grid(track, cfg, wofs_domains=WofsDomain(domain=box))
+    assert a == b == c
 
 
 def _run_all():

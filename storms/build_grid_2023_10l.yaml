@@ -22,10 +22,19 @@ valid_end:   2023090806
 # init_start: 2023082612
 # init_end:   2023090806
 
-# TODO (optional): WoFS domain for this case, estimated from the example
-# plots. Used as a statistics mask -- not as the grid -- so HAFS is still
-# scored outside it. Omit for cases with no WoFS run.
-# wofs_domain: [lat_min, lat_max, lon_min, lon_max]
+# TODO (optional): WoFS deployments for this case, estimated from the example
+# plots. WoFS is re-sited between events, so list one entry per deployment
+# with the period it was running. The grid takes the union of them; each stays
+# a separate statistics mask applied only inside its own window, so a box that
+# was live on day 1 never masks day-3 statistics. Omit for cases with no WoFS.
+# valid_start/valid_end are optional -- leave them out for an always-on box.
+# wofs_domains:
+#   - name: wofs_1
+#     domain: [lat_min, lat_max, lon_min, lon_max]
+#     valid_start: 2023082612
+#     valid_end:   2023090806
+#   - name: wofs_2
+#     domain: [lat_min, lat_max, lon_min, lon_max]
 
 # Wide lat/lon box for map panels only; the grid geometry is derived from the
 # track, not from this.
