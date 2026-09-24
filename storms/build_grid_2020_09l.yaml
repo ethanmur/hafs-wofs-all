@@ -1,0 +1,43 @@
+# Isaias (AL09 2020) -- verification-grid construction (analysis step A2).
+#
+#   python analysis/run.py storms/build_grid_2020_09l.yaml build-grid
+#
+# Writes <out_dir>/grid/build_grid_2020_09l_grid.json (Lambert parameters + the MET grid
+# spec) and a sanity map of the grid, best track by ATCF status, statistics
+# swath, and WoFS box.
+
+storm_name: Isaias
+best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal092020.dat
+
+# TODO: narrow to the verification window. These are the full b-deck extent,
+# which draws the whole track so the landfall window can be chosen from the
+# map; the grid is built from the track INSIDE this window, so leaving it wide
+# makes the grid far larger than it needs to be.
+valid_start: 2020072812
+valid_end:   2020080506
+
+# TODO (optional): model cycles to pull, independent of the scoring window.
+# init_start may sit days before valid_start to reach long lead times; the grid
+# still follows the valid window. init_end defaults to valid_end.
+# init_start: 2020072812
+# init_end:   2020080506
+
+# TODO (optional): WoFS domain for this case, estimated from the example
+# plots. Used as a statistics mask -- not as the grid -- so HAFS is still
+# scored outside it. Omit for cases with no WoFS run.
+# wofs_domain: [lat_min, lat_max, lon_min, lon_max]
+
+# Wide lat/lon box for map panels only; the grid geometry is derived from the
+# track, not from this.
+domain: [9, 50, -83, -51]
+
+out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grids/2020-09l/
+
+verification_grid:
+  res_km: 6.0
+  pad_km: 750.0          # how far the GRID extends past the trimmed track
+  mask_radius_km: 500.0  # how far the STATISTICS swath extends
+  margin_h: 6
+  # Loosened from the 800 default so the whole-track view renders before the
+  # window is narrowed. Drop it back to 800 once valid_start/valid_end are set.
+  max_cells: 1500

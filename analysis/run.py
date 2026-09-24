@@ -1,6 +1,6 @@
 """Single entry point for the HAFS QPF/ETS framework.
 
-    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|download-obs|regrid-obs|plot-regrid|stats-regrid]
+    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid]
 
 Loads a StormCase from the YAML case file and runs the requested product(s):
   parent  nest + parent QPF vs MRMS + Stage IV 4-panel figure
@@ -25,6 +25,10 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
   stats-regrid  distributions and cell-by-cell 1:1 comparisons of the
                 regridded products, per hour and over the whole window,
                 land-only and including ocean, plus stats CSVs (same YAML)
+  build-grid    build this case's common verification grid from the best track
+                inside the valid window, write <out_dir>/grid/<case>_grid.json
+                with the MET grid spec, and draw the sanity map (grid outline,
+                track by ATCF status, statistics swath, WoFS box)
 """
 
 import sys
@@ -34,8 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
             "compare", "replot", "download-obs", "regrid-obs",
-            "plot-regrid", "stats-regrid")
-OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
+            "plot-regrid", "stats-regrid", "build-grid")
+OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "stats-regrid",
+                "build-grid")
 
 
 def parse_args(argv):
@@ -43,7 +48,7 @@ def parse_args(argv):
     if not argv:
         print("usage: run.py <case.yaml> "
               "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|"
-              "download-obs|regrid-obs|plot-regrid|stats-regrid]")
+              "download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid]")
         raise SystemExit(2)
     yaml_path = argv[0]
     command = argv[1] if len(argv) > 1 else "all"
@@ -83,6 +88,10 @@ def main(argv):
         if command == "stats-regrid":
             from obs_regrid_stats import stats_regrid
             stats_regrid(obs_case)
+            return
+        if command == "build-grid":
+            from verification_grid import build_grid_case
+            build_grid_case(obs_case)
             return
         {"download-obs": obs_cases.download_obs,
          "regrid-obs": obs_cases.regrid_obs}[command](obs_case)

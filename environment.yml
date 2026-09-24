@@ -20,8 +20,10 @@ dependencies:
   - s3fs
   - matplotlib
   - cartopy
+  - pyproj
+  - shapely
   - seaborn
   - pillow
   - scikit-learn
-  -pytest
+  - pytest
   # shap  # optional: SHAP importance plots; falls back to permutation importance
