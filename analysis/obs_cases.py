@@ -227,7 +227,22 @@ def download_obs(case):
 # Entry point (compute node) -- reads the cache only, never downloads
 # =============================================================================
 
-def check_cache_complete(case):
+def regrid_sources(case):
+    """Products regrid-obs will actually regrid.
+
+    Just the truth product unless `regrid.sources` overrides it, minus
+    anything a skip_ flag turns off. Only these need to be cached: the other
+    obs products are used by the obs-vs-obs scripts, which read the native
+    caches directly.
+    """
+    skipped = {"mrms": case.skip_mrms, "stage4": case.skip_stage4,
+               "aorc": case.skip_aorc}
+    wanted = (case.regrid.sources if case.regrid and case.regrid.sources
+              else (case.truth_source,))
+    return [s for s in wanted if not skipped.get(s, False)]
+
+
+def check_cache_complete(case, sources=None):
     """List of human-readable missing-item strings; empty means every file
     regrid-obs will need is already cached. Never touches the network, so
     it's safe on a no-internet compute node. The Stage IV check parses the
@@ -235,24 +250,32 @@ def check_cache_complete(case):
     rather than a pure path check, since one file holds many hours and
     there's no filename-only way to know which hours it covers -- that
     parsing is memoized and gets reused by the real read afterwards, so
-    it's not wasted work."""
-    missing = []
+    it's not wasted work.
 
-    stage4_idx = ({} if case.skip_stage4
-                 else stage4_hourly.index_stage4_hourly(str(case.stage4_cache_dir)))
+    `sources` limits the check to the products a command needs; the default
+    is every product not turned off by a skip_ flag."""
+    missing = []
+    if sources is None:
+        sources = [s for s, skip in (("mrms", case.skip_mrms),
+                                     ("stage4", case.skip_stage4),
+                                     ("aorc", case.skip_aorc)) if not skip]
+    sources = set(sources)
+
+    stage4_idx = (stage4_hourly.index_stage4_hourly(str(case.stage4_cache_dir))
+                  if "stage4" in sources else {})
 
     for t in hourly_timestamps(case.valid_start, case.valid_end):
-        if not case.skip_mrms:
+        if "mrms" in sources:
             _, fname = mrms_s3_key(t)
             path = case.mrms_cache_dir / fname.replace(".gz", "")
             if not path.exists():
                 missing.append(f"MRMS hour {t:%Y-%m-%d %HZ} "
                                f"(expected {path})")
-        if not case.skip_stage4 and t not in stage4_idx:
+        if "stage4" in sources and t not in stage4_idx:
             missing.append(f"Stage IV hourly record for {t:%Y-%m-%d %HZ} "
                            f"(expected inside an ST4.<day> file under "
                            f"{case.stage4_cache_dir})")
-        if not case.skip_aorc:
+        if "aorc" in sources:
             path = aorc_common.aorc_cache_path(case.aorc_cache_dir, t)
             if not path.exists():
                 missing.append(f"AORC hour {t:%Y-%m-%d %HZ} "
@@ -260,8 +283,8 @@ def check_cache_complete(case):
     return missing
 
 
-def _exit_if_cache_incomplete(case, command):
-    missing = check_cache_complete(case)
+def _exit_if_cache_incomplete(case, command, sources=None):
+    missing = check_cache_complete(case, sources)
     if not missing:
         return
     print(f"\nERROR: required data is not cached, and {command} does not "
@@ -274,12 +297,16 @@ def _exit_if_cache_incomplete(case, command):
     raise SystemExit(1)
 
 
-def _print_case_header(case, title):
+def _print_case_header(case, title, sources=None):
     print(f"{title}: {case.storm_name}")
     print(f"Window: {case.valid_start:%Y-%m-%d %HZ} -> "
          f"{case.valid_end:%Y-%m-%d %HZ}")
-    print(f"skip_mrms={case.skip_mrms}  skip_stage4={case.skip_stage4}  "
-         f"skip_aorc={case.skip_aorc}", flush=True)
+    if sources is None:
+        print(f"skip_mrms={case.skip_mrms}  skip_stage4={case.skip_stage4}  "
+             f"skip_aorc={case.skip_aorc}", flush=True)
+    else:
+        print(f"Sources: {', '.join(sources)}  "
+             f"(truth_source={case.truth_source})", flush=True)
 
 
 # =============================================================================
@@ -318,8 +345,14 @@ def regrid_obs(case):
     cfg = case.regrid
     if cfg is None:
         raise SystemExit("ERROR: regrid-obs needs a `regrid:` block in the YAML")
-    _print_case_header(case, "Regrid obs")
-    _exit_if_cache_incomplete(case, "regrid-obs")
+    sources = regrid_sources(case)
+    _print_case_header(case, "Regrid obs", sources)
+    if not sources:
+        print(f"Truth source {case.truth_source!r} is skipped -- "
+              "nothing to regrid.")
+        return
+    # Only the products being regridded need to be cached.
+    _exit_if_cache_incomplete(case, "regrid-obs", sources)
 
     tool = met_regrid.met_tool("regrid_data_plane", cfg.met_bin_dir)
     grid_file, grid_desc = met_regrid.resolve_to_grid(cfg)
@@ -330,17 +363,6 @@ def regrid_obs(case):
          f"vld_thresh {cfg.vld_thresh})")
     print(f"Cache:    {cfg.cache_dir}", flush=True)
 
-    # Only the truth product is regridded; the other obs products stay in the
-    # obs-vs-obs comparison scripts, which read the native caches.
-    skipped = {"mrms": case.skip_mrms, "stage4": case.skip_stage4,
-               "aorc": case.skip_aorc}
-    sources = [s for s in (cfg.sources or [case.truth_source])
-               if not skipped.get(s, False)]
-    if not sources:
-        print(f"Truth source {case.truth_source!r} is skipped -- "
-              "nothing to regrid.")
-        return
-    print(f"Sources:  {', '.join(sources)}")
     staging = cfg.cache_dir / "_staging"
     timestamps = hourly_timestamps(case.valid_start, case.valid_end)
     target = None
