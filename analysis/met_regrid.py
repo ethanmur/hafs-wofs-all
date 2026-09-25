@@ -34,8 +34,13 @@ DEFAULT_FIELDS = {
 
 @dataclass
 class RegridConfig:
-    grid_template: str
     cache_dir: Path
+    # Target grid, one of two ways. grid_spec is a MET grid-specification
+    # string (from a verification-grid JSON) and is the current path;
+    # grid_template is the older route -- any GRIB file whose grid is copied --
+    # kept so the obs-vs-obs YAMLs keep working.
+    grid_spec: Optional[str] = None
+    grid_template: Optional[str] = None
     grid_name: str = "hafs_parent"
     method: str = "BUDGET"
     width: int = 2
@@ -43,36 +48,55 @@ class RegridConfig:
     tolerance_pct: float = 2.0
     met_bin_dir: Optional[Path] = None
     fields: dict = field(default_factory=dict)
+    sources: tuple = ()      # empty = just the case's truth_source
 
     def field_spec(self, source):
         return self.fields.get(source, DEFAULT_FIELDS[source])
 
     def output_path(self, source, valid_dt):
-        return self.cache_dir / source / f"{source}_{valid_dt:%Y%m%d%H}.nc"
+        # Flat: one directory per case, the source named in the filename.
+        return self.cache_dir / f"{source}_{valid_dt:%Y%m%d%H}.nc"
 
 
 def regrid_config_from_dict(cfg):
     """RegridConfig from a YAML `regrid:` block, or None when absent."""
     if not cfg:
         return None
-    for key in ("grid_template", "cache_dir"):
-        if key not in cfg:
-            raise KeyError(f"'regrid.{key}' is required")
+    if "cache_dir" not in cfg:
+        raise KeyError("'regrid.cache_dir' is required")
+    grid_spec = cfg.get("grid_spec")
+    grid_name = cfg.get("grid_name")
+    if cfg.get("grid_json"):
+        if grid_spec:
+            raise KeyError("give either regrid.grid_json or regrid.grid_spec")
+        grid_spec, json_name = read_grid_json(cfg["grid_json"])
+        grid_name = grid_name or json_name
+    if not grid_spec and not cfg.get("grid_template"):
+        raise KeyError("one of 'regrid.grid_json', 'regrid.grid_spec' or "
+                       "'regrid.grid_template' is required")
+    sources = [str(v).lower() for v in (cfg.get("sources") or [])]
+    bad = sorted(set(sources) - set(SOURCES))
+    if bad:
+        raise KeyError(f"regrid.sources has unknown source(s) {bad}; "
+                       f"expected any of {SOURCES}")
     fields = dict(cfg.get("fields") or {})
     unknown = sorted(set(fields) - set(SOURCES))
     if unknown:
         raise KeyError(f"regrid.fields has unknown source(s) {unknown}; "
                        f"expected any of {SOURCES}")
     return RegridConfig(
-        grid_template=str(cfg["grid_template"]),
+        grid_template=(str(cfg["grid_template"])
+                       if cfg.get("grid_template") else None),
+        grid_spec=str(grid_spec) if grid_spec else None,
         cache_dir=Path(cfg["cache_dir"]),
-        grid_name=str(cfg.get("grid_name", "hafs_parent")),
+        grid_name=str(grid_name or "hafs_parent"),
         method=str(cfg.get("method", "BUDGET")).upper(),
         width=int(cfg.get("width", 2)),
         vld_thresh=float(cfg.get("vld_thresh", 0.5)),
         tolerance_pct=float(cfg.get("tolerance_pct", 2.0)),
         met_bin_dir=Path(cfg["met_bin_dir"]) if cfg.get("met_bin_dir") else None,
         fields=fields,
+        sources=tuple(sources),
     )
 
 
@@ -136,6 +160,36 @@ def run_regrid(tool, input_path, grid_path, out_path, field_spec, config):
         tmp.unlink(missing_ok=True)
 
 
+def read_grid_json(path):
+    """(met_spec, grid_name) from a verification-grid JSON written by A2."""
+    import json
+    path = Path(path)
+    try:
+        payload = json.loads(path.read_text())
+    except OSError as err:
+        raise FileNotFoundError(
+            f"regrid.grid_json could not be read: {path} ({err}). Run "
+            "`run.py <case>.yaml build-grid` first.") from None
+    if "met_spec" not in payload:
+        raise KeyError(f"{path} has no 'met_spec'; is it a grid JSON?")
+    return payload["met_spec"], payload.get("name")
+
+
+def resolve_to_grid(config):
+    """(-to_grid argument, human-readable description) for regrid_data_plane.
+
+    MET takes either a grid-specification string or a file to copy a grid
+    from, so a verification grid needs no template file cut from a GRIB.
+    """
+    if config.grid_spec:
+        check_cache_settings(config)   # ensure_grid_template does this itself
+        return config.grid_spec, config.grid_spec
+    grid_file = ensure_grid_template(config)
+    source = (config.cache_dir / "grid_template_source.txt")
+    return str(grid_file), (source.read_text().strip() if source.exists()
+                            else str(grid_file))
+
+
 def check_cache_settings(config):
     """Refuse to mix two different regrids in one cache_dir.
 
@@ -145,7 +199,8 @@ def check_cache_settings(config):
     """
     path = config.cache_dir / SETTINGS_FILE
     want = (f"grid_name={config.grid_name}\nmethod={config.method}\n"
-            f"width={config.width}\nvld_thresh={config.vld_thresh}\n")
+            f"width={config.width}\nvld_thresh={config.vld_thresh}\n"
+            f"grid_spec={config.grid_spec or config.grid_template}\n")
     if path.exists():
         have = path.read_text()
         if have != want:
@@ -163,6 +218,8 @@ def check_cache_settings(config):
 def ensure_grid_template(config):
     """Single-message copy of the template's grid, cut once and reused."""
     check_cache_settings(config)
+    if not config.grid_template:
+        raise ValueError("regrid.grid_template is not set")
     small = config.cache_dir / "grid_template.grb2"
     if small.exists():
         return small

@@ -49,6 +49,9 @@ class ObsCase:
     mrms_cache_dir: Path
     stage4_cache_dir: Path        # holds ST4.<YYYYMMDD> hourly source files
     aorc_cache_dir: Path
+    # Stage IV is the truth product for the multi-case study: the MRMS
+    # archive only reaches back to 2020-10, which excludes half the sample.
+    truth_source: str = "stage4"
     skip_mrms: bool = False
     skip_stage4: bool = False
     skip_aorc: bool = False
@@ -112,6 +115,10 @@ def from_yaml(yaml_path):
         wofs_domains = verification_grid.wofs_domains_from_cfg(cfg, yaml_path)
     except ValueError as err:
         raise ValueError(f"{err} in {yaml_path}") from None
+    truth_source = str(cfg.get("truth_source", "stage4")).lower()
+    if truth_source not in met_regrid.SOURCES:
+        raise ValueError(f"truth_source must be one of {met_regrid.SOURCES} "
+                         f"in {yaml_path}, got {truth_source!r}")
     plots = cfg.get("regrid_plots") or {}
     zoom = plots.get("zoom_domain")
     if zoom is not None and len(zoom) != 4:
@@ -127,6 +134,7 @@ def from_yaml(yaml_path):
         mrms_cache_dir=Path(cfg.get("mrms_cache_dir", "/tmp/mrms_cache")),
         stage4_cache_dir=Path(cfg.get("stage4_cache_dir", "/tmp/stage4_cache")),
         aorc_cache_dir=Path(cfg.get("aorc_cache_dir", "/tmp/aorc_cache")),
+        truth_source=truth_source,
         skip_mrms=bool(cfg.get("skip_mrms", False)),
         skip_stage4=bool(cfg.get("skip_stage4", False)),
         skip_aorc=bool(cfg.get("skip_aorc", False)),
@@ -312,20 +320,25 @@ def regrid_obs(case):
     _exit_if_cache_incomplete(case, "regrid-obs")
 
     tool = met_regrid.met_tool("regrid_data_plane", cfg.met_bin_dir)
-    grid_file = met_regrid.ensure_grid_template(cfg)
-    template = (cfg.cache_dir / "grid_template_source.txt").read_text().strip()
+    grid_file, grid_desc = met_regrid.resolve_to_grid(cfg)
     print(f"MET tool: {tool}")
-    print(f"Grid:     {template}")
+    print(f"Grid:     {cfg.grid_name}")
+    print(f"  to_grid {grid_desc}")
     print(f"Method:   {cfg.method} (width {cfg.width}, "
          f"vld_thresh {cfg.vld_thresh})")
     print(f"Cache:    {cfg.cache_dir}", flush=True)
 
-    sources = [s for s, skip in (("mrms", case.skip_mrms),
-                                 ("stage4", case.skip_stage4),
-                                 ("aorc", case.skip_aorc)) if not skip]
+    # Only the truth product is regridded; the other obs products stay in the
+    # obs-vs-obs comparison scripts, which read the native caches.
+    skipped = {"mrms": case.skip_mrms, "stage4": case.skip_stage4,
+               "aorc": case.skip_aorc}
+    sources = [s for s in (cfg.sources or [case.truth_source])
+               if not skipped.get(s, False)]
     if not sources:
-        print("All sources skipped -- nothing to regrid.")
+        print(f"Truth source {case.truth_source!r} is skipped -- "
+              "nothing to regrid.")
         return
+    print(f"Sources:  {', '.join(sources)}")
     staging = cfg.cache_dir / "_staging"
     timestamps = hourly_timestamps(case.valid_start, case.valid_end)
     target = None

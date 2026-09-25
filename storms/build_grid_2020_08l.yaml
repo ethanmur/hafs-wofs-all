@@ -42,6 +42,24 @@ domain: [22, 31, -104, -85]
 
 out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grids/
 
+# Observations. Stage IV is the truth product for this study: the MRMS archive
+# on noaa-mrms-pds only reaches back to 2020-10-14, which excludes half the
+# case list. MRMS stays available as a post-2020 sensitivity check.
+truth_source: stage4
+stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv/
+
+# Regrid the truth product onto this case's verification grid (regrid-obs).
+# grid_json is the file written by build-grid above, so the MET grid spec is
+# never retyped. Only truth_source is regridded; add `sources: [stage4, mrms]`
+# here to regrid more. Needs `module load met/12.2.0`.
+regrid:
+  grid_json: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/grids/build_grid_2020_08l_grid.json
+  cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv-regrid/2020-08l/
+  method: BUDGET
+  width: 2
+  vld_thresh: 0.5
+  tolerance_pct: 2.0
+
 verification_grid:
   res_km: 6.0
   pad_km: 750.0          # how far the GRID extends past the trimmed track

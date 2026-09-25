@@ -427,8 +427,9 @@ def test_regrid_config_defaults_and_cache_layout():
         {"grid_template": "/x/*.grb2", "cache_dir": "/c", "method": "budget",
          "fields": {"mrms": 'name="X"; level="Z0";'}})
     assert cfg.method == "BUDGET" and cfg.width == 2 and cfg.vld_thresh == 0.5
+    # flat layout: one directory per case, source named in the file
     assert cfg.output_path("stage4", datetime(2024, 9, 24, 2)) == Path(
-        "/c/stage4/stage4_2024092402.nc")
+        "/c/stage4_2024092402.nc")
     assert cfg.field_spec("mrms") == 'name="X"; level="Z0";'
     assert cfg.field_spec("aorc") == met_regrid.DEFAULT_FIELDS["aorc"]
 
@@ -455,6 +456,61 @@ class _FakeMonkeypatch:
     def undo(self):
         for obj, name, value in reversed(self._saved):
             setattr(obj, name, value)
+
+
+def test_regrid_config_from_grid_json():
+    import json
+    with tempfile.TemporaryDirectory() as tmp:
+        grid = Path(tmp) / "case_grid.json"
+        grid.write_text(json.dumps({
+            "name": "lambert6km",
+            "met_spec": "lambert 463 513 18.78 106.46 93.05 6.0 6371.2 "
+                        "24.15 42.55"}))
+        cfg = met_regrid.regrid_config_from_dict(
+            {"grid_json": str(grid), "cache_dir": "/c"})
+        assert cfg.grid_spec.startswith("lambert 463 513")
+        assert cfg.grid_name == "lambert6km"
+        assert cfg.grid_template is None
+        # MET takes the spec string directly; no template needs cutting
+        arg, _ = met_regrid.resolve_to_grid(
+            met_regrid.regrid_config_from_dict(
+                {"grid_json": str(grid), "cache_dir": tmp}))
+        assert arg == cfg.grid_spec
+
+
+def test_regrid_config_needs_a_target_grid():
+    try:
+        met_regrid.regrid_config_from_dict({"cache_dir": "/c"})
+    except KeyError as err:
+        assert "grid_json" in str(err)
+        return
+    raise AssertionError("expected KeyError")
+
+
+def test_regrid_config_sources_override():
+    cfg = met_regrid.regrid_config_from_dict(
+        {"grid_spec": "lambert ...", "cache_dir": "/c",
+         "sources": ["stage4", "MRMS"]})
+    assert cfg.sources == ("stage4", "mrms")
+    try:
+        met_regrid.regrid_config_from_dict(
+            {"grid_spec": "x", "cache_dir": "/c", "sources": ["st4"]})
+    except KeyError:
+        return
+    raise AssertionError("expected KeyError")
+
+
+def test_cache_settings_reject_a_different_grid():
+    with tempfile.TemporaryDirectory() as tmp:
+        base = {"cache_dir": tmp, "grid_spec": "lambert 463 513 a"}
+        met_regrid.check_cache_settings(
+            met_regrid.regrid_config_from_dict(base))
+        try:
+            met_regrid.check_cache_settings(met_regrid.regrid_config_from_dict(
+                {**base, "grid_spec": "lambert 999 999 b"}))
+        except ValueError:
+            return
+        raise AssertionError("expected ValueError for a changed grid")
 
 
 def _run_all():
