@@ -13,14 +13,14 @@ best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal102023.dat
 # which draws the whole track so the landfall window can be chosen from the
 # map; the grid is built from the track INSIDE this window, so leaving it wide
 # makes the grid far larger than it needs to be.
-valid_start: 2023082612
-valid_end:   2023090806
+valid_start: 2023083000
+valid_end:   2023083106
 
 # TODO (optional): model cycles to pull, independent of the scoring window.
 # init_start may sit days before valid_start to reach long lead times; the grid
 # still follows the valid window. init_end defaults to valid_end.
-# init_start: 2023082612
-# init_end:   2023090806
+init_start: 2023082618
+init_end:   2023083106
 
 # TODO (optional): WoFS deployments for this case, estimated from the example
 # plots. WoFS is re-sited between events, so list one entry per deployment
@@ -28,13 +28,11 @@ valid_end:   2023090806
 # a separate statistics mask applied only inside its own window, so a box that
 # was live on day 1 never masks day-3 statistics. Omit for cases with no WoFS.
 # valid_start/valid_end are optional -- leave them out for an always-on box.
-# wofs_domains:
-#   - name: wofs_1
-#     domain: [lat_min, lat_max, lon_min, lon_max]
-#     valid_start: 2023082612
-#     valid_end:   2023090806
-#   - name: wofs_2
-#     domain: [lat_min, lat_max, lon_min, lon_max]
+wofs_domains:
+  - name: wofs_1
+    domain: [27.1, 35.2, -86.3, -76.9]
+    valid_start: 2023083017
+    valid_end:   2023083109
 
 # Wide lat/lon box for map panels only; the grid geometry is derived from the
 # track, not from this.

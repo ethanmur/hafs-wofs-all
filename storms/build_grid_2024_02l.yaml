@@ -13,14 +13,14 @@ best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal022024.dat
 # which draws the whole track so the landfall window can be chosen from the
 # map; the grid is built from the track INSIDE this window, so leaving it wide
 # makes the grid far larger than it needs to be.
-valid_start: 2024062812
-valid_end:   2024071112
+valid_start: 2024070818
+valid_end:  2024071112
 
 # TODO (optional): model cycles to pull, independent of the scoring window.
 # init_start may sit days before valid_start to reach long lead times; the grid
 # still follows the valid window. init_end defaults to valid_end.
-# init_start: 2024062812
-# init_end:   2024071112
+init_start: 2024070512
+init_end: 2024070818
 
 # TODO (optional): WoFS deployments for this case, estimated from the example
 # plots. WoFS is re-sited between events, so list one entry per deployment
@@ -28,13 +28,28 @@ valid_end:   2024071112
 # a separate statistics mask applied only inside its own window, so a box that
 # was live on day 1 never masks day-3 statistics. Omit for cases with no WoFS.
 # valid_start/valid_end are optional -- leave them out for an always-on box.
-# wofs_domains:
-#   - name: wofs_1
-#     domain: [lat_min, lat_max, lon_min, lon_max]
-#     valid_start: 2024062812
-#     valid_end:   2024071112
-#   - name: wofs_2
-#     domain: [lat_min, lat_max, lon_min, lon_max]
+wofs_domains:
+  - name: wofs_1
+    domain: [34.2, 42.3, -97.2, -86.9]
+    valid_start: 2024070817
+    valid_end: 2024070912
+  - name: wofs_2
+    domain: [26.2, 34.3, -100.1, -90.7]
+    valid_start: 2024070811
+    valid_end: 2024070900
+  - name: wofs_3
+    domain: [33.3, 41.4, -93.0, -82.8]
+    valid_start: 2024070917          
+    valid_end: 2024071009
+# note: the 7/9 ny case isn't noted in my logs, so being skipped here...
+  - name: wofs_4
+    domain: [36.6, 44.7, -80.8, -70.2]
+    valid_start: 2024071017
+    valid_end: 2024071109
+  - name: wofs_5
+    domain: [37.8, 45.9, -83.9, -73.0]
+    valid_start: 2024071011
+    valid_end: 2024071021
 
 # Wide lat/lon box for map panels only; the grid geometry is derived from the
 # track, not from this.

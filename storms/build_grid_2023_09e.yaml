@@ -14,13 +14,13 @@ best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bep092023.dat
 # map; the grid is built from the track INSIDE this window, so leaving it wide
 # makes the grid far larger than it needs to be.
 valid_start: 2023081718
-valid_end:   2023082018
+valid_end:   2023082112
 
 # TODO (optional): model cycles to pull, independent of the scoring window.
 # init_start may sit days before valid_start to reach long lead times; the grid
 # still follows the valid window. init_end defaults to valid_end.
-# init_start: 2023081606
-# init_end:   2023082021
+init_start: 2023081718
+init_end:   2023082018
 
 # TODO (optional): WoFS deployments for this case, estimated from the example
 # plots. WoFS is re-sited between events, so list one entry per deployment
