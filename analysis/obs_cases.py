@@ -57,6 +57,7 @@ class ObsCase:
     skip_aorc: bool = False
     case_slug: str = "obs_case"
     regrid: Optional[met_regrid.RegridConfig] = None
+    log_dir: Optional[Path] = None           # default: out_dir/logs
     regrid_plot_dir: Optional[Path] = None   # plot-regrid output root
     zoom_domain: Optional[tuple] = None      # (lat_min, lat_max, lon_min, lon_max)
     # Model cycles to pull and verify. Independent of the scoring window:
@@ -139,6 +140,7 @@ def from_yaml(yaml_path):
         skip_stage4=bool(cfg.get("skip_stage4", False)),
         skip_aorc=bool(cfg.get("skip_aorc", False)),
         case_slug=yaml_path.stem,
+        log_dir=Path(cfg["log_dir"]) if cfg.get("log_dir") else None,
         regrid=met_regrid.regrid_config_from_dict(cfg.get("regrid")),
         regrid_plot_dir=(Path(plots["out_dir"]) if plots.get("out_dir")
                          else out_dir / "regrid"),

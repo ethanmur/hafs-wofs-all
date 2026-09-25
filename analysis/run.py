@@ -76,25 +76,31 @@ def dispatch(case, command):
         compute_rmse(case, fields=fields)
 
 
+def _run_obs(obs_cases, obs_case, command):
+    if command == "plot-regrid":
+        from obs_regrid_plots import plot_regrid
+        plot_regrid(obs_case)
+        return
+    if command == "stats-regrid":
+        from obs_regrid_stats import stats_regrid
+        stats_regrid(obs_case)
+        return
+    if command == "build-grid":
+        from verification_grid import build_grid_case
+        build_grid_case(obs_case)
+        return
+    {"download-obs": obs_cases.download_obs,
+     "regrid-obs": obs_cases.regrid_obs}[command](obs_case)
+
+
 def main(argv):
     yaml_path, command = parse_args(argv)
+    import run_log
     if command in OBS_COMMANDS:
         import obs_cases
         obs_case = obs_cases.from_yaml(yaml_path)
-        if command == "plot-regrid":
-            from obs_regrid_plots import plot_regrid
-            plot_regrid(obs_case)
-            return
-        if command == "stats-regrid":
-            from obs_regrid_stats import stats_regrid
-            stats_regrid(obs_case)
-            return
-        if command == "build-grid":
-            from verification_grid import build_grid_case
-            build_grid_case(obs_case)
-            return
-        {"download-obs": obs_cases.download_obs,
-         "regrid-obs": obs_cases.regrid_obs}[command](obs_case)
+        with run_log.tee(obs_case, command):
+            _run_obs(obs_cases, obs_case, command)
         return
     if command == "cycles-compare":
         from cycles_compare import (load_cycles_comparison,
@@ -111,19 +117,23 @@ def main(argv):
         from hafs_case import cycles_from_yaml
         from cycles import compute_cycles
         ccase = cycles_from_yaml(yaml_path)
-        print(f"Case   : {ccase.storm_name} ({ccase.model_label})")
-        print(f"Window : {ccase.valid_start:%Y-%m-%d %HZ} -> "
-              f"{ccase.valid_end:%Y-%m-%d %HZ}  | run_root: {ccase.run_root}")
-        print(f"Output : {ccase.out_dir}  | command: {command}")
-        compute_cycles(ccase)
+        with run_log.tee(ccase, command):
+            print(f"Case   : {ccase.storm_name} ({ccase.model_label})")
+            print(f"Window : {ccase.valid_start:%Y-%m-%d %HZ} -> "
+                  f"{ccase.valid_end:%Y-%m-%d %HZ}  | "
+                  f"run_root: {ccase.run_root}")
+            print(f"Output : {ccase.out_dir}  | command: {command}")
+            compute_cycles(ccase)
         return
     from hafs_case import from_yaml
     case = from_yaml(yaml_path)
-    print(f"Case   : {case.storm_name} ({case.model_label})")
-    print(f"Init   : {case.init_dt:%Y-%m-%d %HZ}  | run_dir: {case.run_dir}")
-    print(f"Domain : {case.domain}  | track points: {len(case.track)}")
-    print(f"Output : {case.out_dir}  | command: {command}")
-    dispatch(case, command)
+    with run_log.tee(case, command):
+        print(f"Case   : {case.storm_name} ({case.model_label})")
+        print(f"Init   : {case.init_dt:%Y-%m-%d %HZ}  | "
+              f"run_dir: {case.run_dir}")
+        print(f"Domain : {case.domain}  | track points: {len(case.track)}")
+        print(f"Output : {case.out_dir}  | command: {command}")
+        dispatch(case, command)
 
 
 if __name__ == "__main__":
