@@ -172,7 +172,19 @@ def read_grid_json(path):
             "`run.py <case>.yaml build-grid` first.") from None
     if "met_spec" not in payload:
         raise KeyError(f"{path} has no 'met_spec'; is it a grid JSON?")
-    return payload["met_spec"], payload.get("name")
+    return _ensure_hemisphere(payload["met_spec"]), payload.get("name")
+
+
+def _ensure_hemisphere(spec):
+    """Append the hemisphere MET requires, for grid JSONs written without it.
+
+    Saves rebuilding every case's grid just to add a trailing token.
+    """
+    fields = spec.split()
+    if fields and fields[0] == "lambert" and fields[-1] not in ("north",
+                                                                "south"):
+        return spec + " north"
+    return spec
 
 
 def resolve_to_grid(config):

@@ -241,6 +241,8 @@ def test_met_spec_is_west_positive():
     assert float(fields[6]) == spec.res_km
     assert float(fields[7]) == R_EARTH_KM
     assert (float(fields[8]), float(fields[9])) == (spec.lat_1, spec.lat_2)
+    # MET needs the hemisphere when two standard parallels are given
+    assert fields[10] == "north"
 
 
 def test_proj4_is_east_positive():
