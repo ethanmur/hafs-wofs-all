@@ -15,7 +15,7 @@ import yaml
 
 from obs_cases import from_yaml
 from obs_regrid_plots import (crop_slices, load_budget, track_segment,
-                              _budget_note)
+                              available_sources, _budget_note)
 
 
 _TRACK = [
@@ -100,10 +100,107 @@ def test_load_budget_reads_conservation_csv():
     assert _budget_note(budget, t, "mrms") == ""
 
 
+class _Cfg:
+    def __init__(self, present):
+        self._present = present
+
+    def output_path(self, source, t):
+        class _P:
+            def __init__(self, ok):
+                self._ok = ok
+
+            def exists(self):
+                return self._ok
+
+            def __str__(self):
+                return f"{source}_{t:%Y%m%d%H}.nc"
+        return _P((source, t) in self._present)
+
+
+class _Case:
+    def __init__(self, sources, present):
+        self.regrid = _Cfg(present)
+        self._sources = sources
+        self.truth_source = "stage4"
+        self.skip_mrms = self.skip_stage4 = self.skip_aorc = False
+
+
+def _patch_sources(monkeypatch, sources):
+    import obs_cases
+    monkeypatch.setattr(obs_cases, "regrid_sources", lambda case: sources)
+
+
+def test_available_sources_keeps_only_fully_regridded(monkeypatch):
+    times = [datetime(2024, 9, 26, h) for h in (0, 1, 2)]
+    _patch_sources(monkeypatch, ["stage4", "mrms", "aorc"])
+    present = {("stage4", t) for t in times}
+    case = _Case(["stage4", "mrms", "aorc"], present)
+    # only the truth product has been regridded; the others drop out quietly
+    assert available_sources(case, times, "plot-regrid") == ["stage4"]
+
+
+def test_available_sources_errors_on_a_partial_product(monkeypatch):
+    times = [datetime(2024, 9, 26, h) for h in (0, 1, 2)]
+    _patch_sources(monkeypatch, ["stage4"])
+    present = {("stage4", times[0])}          # 1 of 3 hours
+    try:
+        available_sources(_Case(["stage4"], present), times, "plot-regrid")
+    except SystemExit:
+        return
+    raise AssertionError("expected SystemExit for a half-regridded product")
+
+
+def test_available_sources_errors_when_nothing_is_regridded(monkeypatch):
+    times = [datetime(2024, 9, 26, 0)]
+    _patch_sources(monkeypatch, ["stage4"])
+    try:
+        available_sources(_Case(["stage4"], set()), times, "plot-regrid")
+    except SystemExit:
+        return
+    raise AssertionError("expected SystemExit when nothing is regridded")
+
+
+def test_from_yaml_panels_subset():
+    tmp = Path(tempfile.mkdtemp())
+    case = from_yaml(_write_yaml(tmp, regrid_plots={
+        "panels": ["compare-regrid"]}))
+    assert case.regrid_panels == ("compare-regrid",)
+    assert from_yaml(_write_yaml(tmp)).regrid_panels == ()
+
+
+def test_from_yaml_rejects_unknown_panel():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        from_yaml(_write_yaml(tmp, regrid_plots={"panels": ["compare-zoom"]}))
+    except ValueError as err:
+        assert "compare-zoom" in str(err)
+        return
+    raise AssertionError("expected ValueError")
+
+
+class _FakeMonkeypatch:
+    def __init__(self):
+        self._saved = []
+
+    def setattr(self, obj, name, value):
+        self._saved.append((obj, name, getattr(obj, name)))
+        setattr(obj, name, value)
+
+    def undo(self):
+        for obj, name, value in reversed(self._saved):
+            setattr(obj, name, value)
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
-        fn()
+        n_args = fn.__code__.co_argcount
+        mp = _FakeMonkeypatch() if n_args else None
+        try:
+            fn(mp) if mp else fn()
+        finally:
+            if mp:
+                mp.undo()
         print(f"PASS {fn.__name__}")
     print(f"\n{len(fns)} passed")
 

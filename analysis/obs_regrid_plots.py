@@ -208,9 +208,49 @@ def map_figure(panels, domain, track_line, title, out_path):
 # Driver
 # =============================================================================
 
+PANELS = ("compare-regrid", "compare-products", "compare-anomaly")
+
+
 def missing_regridded(case, sources, timestamps):
     return [case.regrid.output_path(s, t) for t in timestamps for s in sources
             if not case.regrid.output_path(s, t).exists()]
+
+
+def available_sources(case, timestamps, command):
+    """The configured products that actually have regridded output.
+
+    A product with no output at all is dropped with a note -- that is the
+    normal state when only the truth product has been regridded. One that is
+    *partly* there is an error, since silently plotting a subset of hours
+    would hide a failed regrid.
+    """
+    sources = oc.regrid_sources(case)
+    if not sources:
+        return []
+    present, absent, partial = [], [], []
+    for source in sources:
+        have = sum(case.regrid.output_path(source, t).exists()
+                   for t in timestamps)
+        if have == len(timestamps):
+            present.append(source)
+        elif have == 0:
+            absent.append(source)
+        else:
+            partial.append((source, have))
+    if partial:
+        print(f"\nERROR: regridded output is incomplete -- run regrid-obs "
+              f"first:\n  python analysis/run.py <yaml> regrid-obs\n")
+        for source, have in partial:
+            print(f"  {source}: {have} of {len(timestamps)} hours present")
+        raise SystemExit(1)
+    if absent:
+        print(f"Not regridded, skipping: {', '.join(absent)}")
+    if not present:
+        print(f"\nERROR: no regridded output for {', '.join(sources)} -- run "
+              f"regrid-obs first:\n"
+              f"  python analysis/run.py <yaml> regrid-obs\n")
+        raise SystemExit(1)
+    return present
 
 
 def load_budget(case):
@@ -240,26 +280,30 @@ def plot_regrid(case):
     cfg = case.regrid
     if cfg is None:
         raise SystemExit("ERROR: plot-regrid needs a `regrid:` block in the YAML")
-    oc._print_case_header(case, "Plot regridded obs")
-    sources = [s for s, skip in (("mrms", case.skip_mrms),
-                                 ("stage4", case.skip_stage4),
-                                 ("aorc", case.skip_aorc)) if not skip]
-    if not sources:
-        print("All sources skipped -- nothing to plot.")
-        return
-    oc._exit_if_cache_incomplete(case, "plot-regrid")
     timestamps = oc.hourly_timestamps(case.valid_start, case.valid_end)
-    missing = missing_regridded(case, sources, timestamps)
-    if missing:
-        print(f"\nERROR: {len(missing)} regridded file(s) missing -- run "
-              "regrid-obs first:\n  python analysis/run.py <yaml> regrid-obs\n")
-        for path in missing[:25]:
-            print(f"  missing: {path}")
-        raise SystemExit(1)
+    sources = available_sources(case, timestamps, "plot-regrid")
+    oc._print_case_header(case, "Plot regridded obs", sources)
+    # The native field is needed for the native-vs-regridded panels, so only
+    # the products actually being plotted have to be cached.
+    oc._exit_if_cache_incomplete(case, "plot-regrid", sources)
+
+    panels = case.regrid_panels or PANELS
+    if len(sources) < 2:
+        dropped = [k for k in ("compare-products", "compare-anomaly")
+                   if k in panels]
+        if dropped:
+            print(f"Only {sources[0]} is regridded, so "
+                  f"{' and '.join(dropped)} need a second product and are "
+                  "skipped.")
+        panels = [k for k in panels if k not in dropped]
+    elif "compare-anomaly" in panels and TRUTH not in sources:
+        print(f"compare-anomaly uses {LABELS[TRUTH]} as truth and it is not "
+              "regridded -- skipped.")
+        panels = [k for k in panels if k != "compare-anomaly"]
+    print(f"Panels:       {', '.join(panels)}")
 
     out = case.regrid_plot_dir
-    dirs = {k: out / k for k in ("compare-regrid", "compare-products",
-                                 "compare-anomaly")}
+    dirs = {k: out / k for k in panels}
     domains = {"full": case.domain}
     if case.zoom_domain:
         domains["zoom"] = case.zoom_domain
@@ -297,6 +341,8 @@ def plot_regrid(case):
                     if (key, dname) not in cuts:
                         cuts[key, dname] = crop_slices(la, lo, domain,
                                                        max_cells)
+                if "compare-regrid" not in panels:
+                    continue
                 label = LABELS[source]
                 map_figure(
                     [(f"{label} native",
@@ -311,14 +357,15 @@ def plot_regrid(case):
 
         rlat, rlon, _ = next(iter(regridded.values()))
         cut = cuts["regrid", "full"]
-        map_figure(
-            [(LABELS[s], *_cropped(*regridded[s], cut), "qpf")
-             for s in sources],
-            case.domain, track_line,
-            f"Regridded 1-h precipitation on the {grid_desc}, {valid}",
-            dirs["compare-products"] / f"products_full_{stamp}.png")
+        if "compare-products" in panels:
+            map_figure(
+                [(LABELS[s], *_cropped(*regridded[s], cut), "qpf")
+                 for s in sources],
+                case.domain, track_line,
+                f"Regridded 1-h precipitation on the {grid_desc}, {valid}",
+                dirs["compare-products"] / f"products_full_{stamp}.png")
 
-        if TRUTH in regridded:
+        if "compare-anomaly" in panels and TRUTH in regridded:
             truth = regridded[TRUTH][2]
             panels = [(f"{LABELS[TRUTH]} (truth)",
                        *_cropped(rlat, rlon, truth, cut), "qpf")]

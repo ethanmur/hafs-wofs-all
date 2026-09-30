@@ -66,6 +66,9 @@ skip_aorc: false
 # of grid_template -- any GRIB file on the target grid; the first glob match
 # is used and its grid copied into cache_dir. Needs `module load met/12.2.0`.
 regrid:
+  # This is the three-way obs-vs-obs comparison, so regrid
+  # every product rather than just truth_source.
+  sources: [mrms, stage4, aorc]
   grid_template: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs/2024-02l/HFSA/09l.2024092400.hfsa.parent.atm.f000.grb2
   grid_name: hafs_parent
   cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/regrid_obs/2024-09l-helene/

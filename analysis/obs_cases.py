@@ -60,6 +60,7 @@ class ObsCase:
     log_dir: Optional[Path] = None           # default: out_dir/logs
     regrid_plot_dir: Optional[Path] = None   # plot-regrid output root
     zoom_domain: Optional[tuple] = None      # (lat_min, lat_max, lon_min, lon_max)
+    regrid_panels: tuple = ()                # empty = every panel
     # Model cycles to pull and verify. Independent of the scoring window:
     # init_start may precede valid_start to reach long lead times, and the
     # verification grid still follows the valid window, not init_start.
@@ -121,6 +122,12 @@ def from_yaml(yaml_path):
         raise ValueError(f"truth_source must be one of {met_regrid.SOURCES} "
                          f"in {yaml_path}, got {truth_source!r}")
     plots = cfg.get("regrid_plots") or {}
+    panels = tuple(str(v) for v in (plots.get("panels") or ()))
+    known = ("compare-regrid", "compare-products", "compare-anomaly")
+    bad = [k for k in panels if k not in known]
+    if bad:
+        raise ValueError(f"regrid_plots.panels has unknown panel(s) {bad}; "
+                         f"expected any of {known} in {yaml_path}")
     zoom = plots.get("zoom_domain")
     if zoom is not None and len(zoom) != 4:
         raise ValueError("regrid_plots.zoom_domain must be "
@@ -145,6 +152,7 @@ def from_yaml(yaml_path):
         regrid_plot_dir=(Path(plots["out_dir"]) if plots.get("out_dir")
                          else out_dir / "regrid"),
         zoom_domain=tuple(float(v) for v in zoom) if zoom else None,
+        regrid_panels=panels,
         init_start=init_start,
         init_end=init_end,
         wofs_domains=wofs_domains,

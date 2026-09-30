@@ -51,6 +51,19 @@ regrid:
   vld_thresh: 0.5
   tolerance_pct: 2.0
 
+# Maps of the regridded obs (plot-regrid). Only the regridded products are
+# plotted, so with truth_source alone this gives the Stage IV native-vs-
+# regridded panels in both the wide and zoom views; compare-products and
+# compare-anomaly need a second product and are skipped automatically.
+# `panels:` restricts the output -- drop it for everything available.
+regrid_plots:
+  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-obs/2018-14l/
+  panels: [compare-regrid]
+  # zoom_domain is [lat_min, lat_max, lon_min, lon_max] for the close-up that
+  # shows small-scale changes the wide view cannot. Pick a box over the
+  # heaviest rain; delete it to skip the zoom maps.
+  # zoom_domain: [lat_min, lat_max, lon_min, lon_max]
+
 verification_grid:
   res_km: 6.0
   pad_km: 750.0          # how far the GRID extends past the trimmed track

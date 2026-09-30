@@ -35,7 +35,7 @@ from matplotlib.colors import LogNorm
 
 import met_regrid
 import obs_cases as oc
-from obs_regrid_plots import LABELS, missing_regridded
+from obs_regrid_plots import LABELS, available_sources
 
 MIN_RAIN_MM = 0.1        # below this a cell counts as dry, not as light rain
 MAX_BIN_MM = 200.0       # heavier hours pile into the last bin
@@ -262,21 +262,9 @@ def stats_regrid(case):
     cfg = case.regrid
     if cfg is None:
         raise SystemExit("ERROR: stats-regrid needs a `regrid:` block in the YAML")
-    oc._print_case_header(case, "Stats on regridded obs")
-    sources = [s for s, skip in (("mrms", case.skip_mrms),
-                                 ("stage4", case.skip_stage4),
-                                 ("aorc", case.skip_aorc)) if not skip]
-    if not sources:
-        print("All sources skipped -- nothing to do.")
-        return
     timestamps = oc.hourly_timestamps(case.valid_start, case.valid_end)
-    missing = missing_regridded(case, sources, timestamps)
-    if missing:
-        print(f"\nERROR: {len(missing)} regridded file(s) missing -- run "
-              "regrid-obs first:\n  python analysis/run.py <yaml> regrid-obs\n")
-        for path in missing[:25]:
-            print(f"  missing: {path}")
-        raise SystemExit(1)
+    sources = available_sources(case, timestamps, "stats-regrid")
+    oc._print_case_header(case, "Stats on regridded obs", sources)
 
     variants = ["all"]
     if "aorc" in sources:
@@ -287,8 +275,14 @@ def stats_regrid(case):
     out = case.regrid_plot_dir
     print(f"Regrid cache: {cfg.cache_dir}")
     print(f"Output:       {out}")
-    print(f"Variants:     {', '.join(variants)}   pairs: "
-          + ", ".join(f"{LABELS[a]}/{LABELS[b]}" for a, b in pairs), flush=True)
+    if pairs:
+        print(f"Variants:     {', '.join(variants)}   pairs: "
+              + ", ".join(f"{LABELS[a]}/{LABELS[b]}" for a, b in pairs),
+              flush=True)
+    else:
+        print(f"Variants:     {', '.join(variants)}   pairs: none "
+              "(a 1:1 comparison needs two regridded products, so "
+              "distributions only)", flush=True)
 
     total = {v: ({s: SourceStats() for s in sources},
                  {p: PairStats() for p in pairs}) for v in variants}
@@ -327,10 +321,11 @@ def stats_regrid(case):
                 f"1-h precipitation distribution, {t:%Y-%m-%d %HZ} "
                 f"({scope}; dry = below {MIN_RAIN_MM} mm)",
                 out / "distributions" / f"dist_{variant}_{t:%Y%m%d%H}.png")
-            one_to_one_figure(
-                [(a, b, hour_pair[a, b]) for a, b in pairs],
-                f"Cell-by-cell comparison, {t:%Y-%m-%d %HZ} ({scope})",
-                out / "one-to-one" / f"oneone_{variant}_{t:%Y%m%d%H}.png")
+            if pairs:
+                one_to_one_figure(
+                    [(a, b, hour_pair[a, b]) for a, b in pairs],
+                    f"Cell-by-cell comparison, {t:%Y-%m-%d %HZ} ({scope})",
+                    out / "one-to-one" / f"oneone_{variant}_{t:%Y%m%d%H}.png")
         print(f"  [{i:>3}/{len(timestamps)}] {t:%Y-%m-%d %HZ}  done "
               f"(+{time.monotonic() - started:.0f}s)", flush=True)
 
@@ -352,10 +347,11 @@ def stats_regrid(case):
             f"1-h precipitation distribution, all hours {window} "
             f"({scope}; dry = below {MIN_RAIN_MM} mm)",
             out / "distributions" / f"dist_{variant}_combined.png")
-        one_to_one_figure(
-            [(a, b, pair_total[a, b]) for a, b in pairs],
-            f"Cell-by-cell comparison, all hours {window} ({scope})",
-            out / "one-to-one" / f"oneone_{variant}_combined.png")
+        if pairs:
+            one_to_one_figure(
+                [(a, b, pair_total[a, b]) for a, b in pairs],
+                f"Cell-by-cell comparison, all hours {window} ({scope})",
+                out / "one-to-one" / f"oneone_{variant}_combined.png")
 
     for name, rows in (("sources", src_rows), ("pairs", pair_rows)):
         path = out / f"stats_{name}_{case.output_slug}.csv"
