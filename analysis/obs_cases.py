@@ -381,12 +381,12 @@ def regrid_obs(case):
             status = "cached"
             if not out.exists():
                 staged = write_met_input(staging)
-                try:
-                    met_regrid.run_regrid(tool, staged, grid_file, out,
-                                          cfg.field_spec(source), cfg)
-                finally:
-                    if staged.parent == staging:
-                        staged.unlink(missing_ok=True)
+                met_regrid.run_regrid(tool, staged, grid_file, out,
+                                      cfg.field_spec(source), cfg)
+                # Kept on failure: the staged input is what you need to
+                # inspect with plot_data_plane when MET rejects an hour.
+                if staged.parent == staging:
+                    staged.unlink(missing_ok=True)
                 status = "regridded"
             rlat, rlon, rvals = met_regrid.read_regridded(out)
 

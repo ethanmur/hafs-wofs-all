@@ -384,7 +384,11 @@ def test_run_regrid_rejects_all_missing_output_even_on_exit_0():
             assert False, "expected RuntimeError"
         except RuntimeError as e:
             assert "all-missing" in str(e) and "grid mismatch" in str(e)
-        assert list(out.parent.iterdir()) == []
+        # the cache entry itself is never written ...
+        assert not out.exists()
+        # ... but the rejected field is kept so it can be inspected
+        kept = out.with_suffix(".all-missing.nc")
+        assert [p.name for p in out.parent.iterdir()] == [kept.name]
 
 
 def test_run_regrid_failure_reports_met_log_and_leaves_nothing():

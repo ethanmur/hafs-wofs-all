@@ -133,7 +133,7 @@ def _tmp_path(path):
     return path.with_name(f"{path.stem}.tmp{path.suffix}")
 
 
-def _all_missing_hint(cmd, config):
+def _all_missing_hint(cmd, config, kept=None):
     """Next steps when MET regridded a populated field into nothing.
 
     If MET's debug showed the output grid where it was meant to be, the
@@ -145,6 +145,7 @@ def _all_missing_hint(cmd, config):
         if flag in swap:
             swap[swap.index(flag) + 1] = value
     quoted = " ".join(f"'{a}'" if " " in a else a for a in swap)
+    staged = cmd[1] if len(cmd) > 1 else "<staged input>"
     return (
         f"\n\nMET read the input plane but every output cell is missing. If its "
         f"'Output grid:' line above shows the grid where you expect it, the "
@@ -156,8 +157,13 @@ def _all_missing_hint(cmd, config):
         f"  * data appears  -> {config.method}/width is the problem. Try "
         f"`regrid: {{method: NEAREST, width: 1}}` in the YAML, or a larger "
         f"odd width (3 or 5) with BUDGET.\n"
-        f"  * still missing -> the staged input does not overlap the grid; "
-        f"check the staged GRIB with plot_data_plane.")
+        f"  * still missing -> the staged input does not overlap the grid.\n"
+        f"The staged input and the rejected output are both kept for "
+        f"inspection:\n"
+        f"  plot_data_plane {staged} /tmp/staged.ps "
+        f"'name=\"APCP\"; level=\"A1\";'\n"
+        + (f"  plot_data_plane {kept} /tmp/regridded.ps "
+           f"'name=\"precip\"; level=\"(*,*)\";'\n" if kept else ""))
 
 
 def _met_failure(summary, cmd, proc):
@@ -179,9 +185,12 @@ def run_regrid(tool, input_path, grid_path, out_path, field_spec, config):
         # MET can exit 0 having found no usable source data (e.g. a grid it
         # misread), leaving an all-missing field that must not be cached.
         if valid_value_count(tmp) == 0:
+            # Keep the rejected output; it is the other half of the evidence.
+            kept = out_path.with_suffix(".all-missing.nc")
+            tmp.replace(kept)
             raise RuntimeError(_met_failure(
                 "regrid_data_plane exited 0 but wrote an all-missing field"
-                + _all_missing_hint(cmd, config), cmd, proc))
+                + _all_missing_hint(cmd, config, kept), cmd, proc))
         tmp.replace(out_path)
     finally:
         tmp.unlink(missing_ok=True)
