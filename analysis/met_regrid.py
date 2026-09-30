@@ -176,15 +176,23 @@ def read_grid_json(path):
 
 
 def _ensure_hemisphere(spec):
-    """Append the hemisphere MET requires, for grid JSONs written without it.
+    """Normalise the trailing hemisphere MET requires on a lambert spec.
 
-    Saves rebuilding every case's grid just to add a trailing token.
+    MET only accepts the single letter, so a JSON written with "north" is
+    rewritten and one written without any hemisphere gets "N" appended --
+    either way, no rebuilding every case's grid over a trailing token.
     """
     fields = spec.split()
-    if fields and fields[0] == "lambert" and fields[-1] not in ("north",
-                                                                "south"):
-        return spec + " north"
-    return spec
+    if not fields or fields[0] != "lambert":
+        return spec
+    last = fields[-1].lower()
+    if last in ("north", "south"):
+        fields[-1] = last[0].upper()
+    elif last not in ("n", "s"):
+        fields.append("N")
+    else:
+        fields[-1] = last.upper()
+    return " ".join(fields)
 
 
 def resolve_to_grid(config):

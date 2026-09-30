@@ -266,10 +266,10 @@ class GridSpec:
     def met_spec(self):
         """MET grid-specification string for -to_grid / regrid.to_grid."""
         sign = -1.0 if MET_LON_WEST_POSITIVE else 1.0
-        # The trailing hemisphere is required: with two standard parallels
-        # given, MET's parse_lambert_grid() reads it as the next token and
-        # fails with "bad hemisphere in grid spec" if it is absent.
-        hemisphere = "north" if self.lat_0 >= 0 else "south"
+        # The trailing hemisphere is required, and MET wants the single
+        # letter: parse_lambert_grid() rejects "north" with "bad hemisphere
+        # in grid spec" just as it rejects the token being absent.
+        hemisphere = "N" if self.lat_0 >= 0 else "S"
         return (f"lambert {self.nx} {self.ny} "
                 f"{self.lat_ll:.6f} {sign * self.lon_ll:.6f} "
                 f"{sign * self.lon_0:.6f} {self.res_km:.6f} "
