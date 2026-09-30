@@ -133,6 +133,33 @@ def _tmp_path(path):
     return path.with_name(f"{path.stem}.tmp{path.suffix}")
 
 
+def _all_missing_hint(cmd, config):
+    """Next steps when MET regridded a populated field into nothing.
+
+    If MET's debug showed the output grid where it was meant to be, the
+    geometry is fine and the interpolation is the suspect -- so point at the
+    knobs rather than at the grid.
+    """
+    swap = list(cmd)
+    for flag, value in (("-method", "NEAREST"), ("-width", "1")):
+        if flag in swap:
+            swap[swap.index(flag) + 1] = value
+    quoted = " ".join(f"'{a}'" if " " in a else a for a in swap)
+    return (
+        f"\n\nMET read the input plane but every output cell is missing. If its "
+        f"'Output grid:' line above shows the grid where you expect it, the "
+        f"geometry is right and the interpolation is the suspect "
+        f"({config.method}, width {config.width}, vld_thresh "
+        f"{config.vld_thresh}).\n"
+        f"Fastest discriminator -- rerun by hand with nearest-neighbour:\n"
+        f"  {quoted}\n"
+        f"  * data appears  -> {config.method}/width is the problem. Try "
+        f"`regrid: {{method: NEAREST, width: 1}}` in the YAML, or a larger "
+        f"odd width (3 or 5) with BUDGET.\n"
+        f"  * still missing -> the staged input does not overlap the grid; "
+        f"check the staged GRIB with plot_data_plane.")
+
+
 def _met_failure(summary, cmd, proc):
     log = (proc.stderr + proc.stdout).strip().splitlines()
     return f"{summary}:\n  {shlex.join(cmd)}\n  " + "\n  ".join(log[-20:])
@@ -153,8 +180,8 @@ def run_regrid(tool, input_path, grid_path, out_path, field_spec, config):
         # misread), leaving an all-missing field that must not be cached.
         if valid_value_count(tmp) == 0:
             raise RuntimeError(_met_failure(
-                "regrid_data_plane exited 0 but wrote an all-missing field",
-                cmd, proc))
+                "regrid_data_plane exited 0 but wrote an all-missing field"
+                + _all_missing_hint(cmd, config), cmd, proc))
         tmp.replace(out_path)
     finally:
         tmp.unlink(missing_ok=True)
