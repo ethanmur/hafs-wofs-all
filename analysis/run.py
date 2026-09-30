@@ -20,8 +20,10 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
                 per-hour conservation check CSV; needs `module load met`
                 (takes an obs-case YAML with a `regrid:` block)
   plot-regrid   hourly maps of the regrid-obs output: native vs regridded
-                (full + zoom domain), all products side by side, and
-                anomalies vs AORC; reads the caches only (same YAML)
+                (full + zoom domain) for each regridded product, plus, when
+                two or more are regridded, all products side by side and
+                anomalies vs AORC; `regrid_plots.panels` restricts which.
+                Reads the caches only (same YAML)
   stats-regrid  distributions and cell-by-cell 1:1 comparisons of the
                 regridded products, per hour and over the whole window,
                 land-only and including ocean, plus stats CSVs (same YAML)

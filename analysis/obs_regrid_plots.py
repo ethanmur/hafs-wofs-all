@@ -1,8 +1,10 @@
 """Maps of the MET-regridded obs written by regrid-obs (plot-regrid).
 
 For every hour in the case window, into case.regrid_plot_dir:
-  compare-regrid/<source>_{full,zoom}_<YYYYMMDDHH>.png
-      native vs regridded, 1x2, full domain and case.zoom_domain
+  <source>_{full,zoom}_<YYYYMMDDHH>.png
+      native vs regridded, 1x2, full domain and case.zoom_domain; written
+      straight into regrid_plot_dir, since this is the usual single-product
+      check and a subfolder of one thing is noise
   compare-products/products_full_<YYYYMMDDHH>.png
       MRMS | Stage IV | AORC, all on the regrid grid
   compare-anomaly/anomaly_full_<YYYYMMDDHH>.png
@@ -303,7 +305,9 @@ def plot_regrid(case):
     print(f"Panels:       {', '.join(panels)}")
 
     out = case.regrid_plot_dir
-    dirs = {k: out / k for k in panels}
+    # compare-regrid is the common single-product case, so its maps go
+    # straight into out_dir; the multi-product panels keep subfolders.
+    dirs = {k: (out if k == "compare-regrid" else out / k) for k in panels}
     domains = {"full": case.domain}
     if case.zoom_domain:
         domains["zoom"] = case.zoom_domain

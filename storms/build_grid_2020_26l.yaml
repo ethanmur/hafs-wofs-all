@@ -62,11 +62,12 @@ regrid:
 
 # Maps of the regridded obs (plot-regrid). Only the regridded products are
 # plotted, so with truth_source alone this gives the Stage IV native-vs-
-# regridded panels in both the wide and zoom views; compare-products and
-# compare-anomaly need a second product and are skipped automatically.
+# regridded panels in both the wide and zoom views, written straight into
+# out_dir; compare-products and compare-anomaly need a second product, are
+# skipped automatically, and get their own subfolders when they do run.
 # `panels:` restricts the output -- drop it for everything available.
 regrid_plots:
-  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-obs/2020-26l/
+  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-stage-iv-plots/2020-26l/
   panels: [compare-regrid]
   # zoom_domain is [lat_min, lat_max, lon_min, lon_max] for the close-up that
   # shows small-scale changes the wide view cannot. Pick a box over the
