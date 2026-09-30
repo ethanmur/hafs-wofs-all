@@ -36,6 +36,7 @@ from plot_units import inches
 from best_track import parse_bdeck
 from compare import _add_us_geography
 import met_regrid
+import verification_grid as vg
 import obs_cases as oc
 
 LABELS = {"mrms": "MRMS", "stage4": "Stage IV", "aorc": "AORC"}
@@ -71,7 +72,50 @@ def _draw_track(ax, track_line):
             transform=ccrs.PlateCarree(), zorder=6)
 
 
-def _panel_frame(ax, domain, track_line, title):
+GRID_EDGE_COLOR = "#444444"
+WOFS_EDGE_COLOR = "#cc79a7"
+# Blank margin around the regrid grid, as a fraction of its latitude span,
+# so the domain outline is visible instead of running along the panel edge.
+DOMAIN_MARGIN_FRAC = 0.04
+DOMAIN_MARGIN_MIN_DEG = 1.5
+
+
+def grid_overlays(rlat, rlon, wofs_domains):
+    """Outline of the regrid grid plus each WoFS box, for _panel_frame."""
+    olat, olon = vg._grid_outline(rlat, rlon)
+    return {"outline": (olat, olon),
+            "wofs": [tuple(d.domain) for d in (wofs_domains or [])]}
+
+
+def centred_domain(rlat, rlon):
+    """(lat_min, lat_max, lon_min, lon_max) framing the regrid grid.
+
+    The grid figures are drawn on the grid's own extent with a small margin,
+    so the regrid plots use the same framing and the two are comparable.
+    """
+    margin = max(DOMAIN_MARGIN_MIN_DEG,
+                 DOMAIN_MARGIN_FRAC * float(rlat.max() - rlat.min()))
+    return (max(float(rlat.min()) - margin, -85.0),
+            min(float(rlat.max()) + margin, 85.0),
+            float(rlon.min()) - margin, float(rlon.max()) + margin)
+
+
+def _draw_overlays(ax, overlays):
+    from matplotlib.patches import Rectangle
+    if not overlays:
+        return
+    olat, olon = overlays.get("outline", (None, None))
+    if olat is not None:
+        ax.plot(olon, olat, color=GRID_EDGE_COLOR, lw=1.6,
+                transform=ccrs.PlateCarree(), zorder=7)
+    for lat0, lat1, lon0, lon1 in overlays.get("wofs", []):
+        ax.add_patch(Rectangle(
+            (lon0, lat0), lon1 - lon0, lat1 - lat0,
+            transform=ccrs.PlateCarree(), facecolor="none",
+            edgecolor=WOFS_EDGE_COLOR, lw=1.6, linestyle="--", zorder=8))
+
+
+def _panel_frame(ax, domain, track_line, title, overlays=None):
     """Draw one map panel's frame. Returns the text artists, which the
     caller MUST pass to savefig(bbox_extra_artists=...): they sit outside
     the axes, and GeoAxes.get_tightbbox() doesn't report them, so
@@ -84,6 +128,7 @@ def _panel_frame(ax, domain, track_line, title):
     gl.top_labels = gl.right_labels = False
     if track_line:
         _draw_track(ax, track_line)
+    _draw_overlays(ax, overlays)
     # ax.set_title() on a GeoAxes is frequently clipped by
     # savefig(bbox_inches="tight"); a plain text artist in axes coordinates
     # is measured correctly and never gets cut off.
@@ -153,7 +198,8 @@ def crop_slices(lat, lon, domain, max_cells=None):
     return slice(r0, r1, step), slice(c0, c1, step)
 
 
-def map_figure(panels, domain, track_line, title, out_path):
+def map_figure(panels, domain, track_line, title, out_path,
+               overlays=None):
     """panels: [(panel_title, lat2d, lon2d, data_mm_or_None, style)], style
     "qpf" or "diff". One horizontal colorbar under each run of same-style
     panels; data None draws an "unavailable" panel."""
@@ -174,7 +220,7 @@ def map_figure(panels, domain, track_line, title, out_path):
     extra = []
     groups = []   # [style, [axes], mappable]
     for ax, (ptitle, lat, lon, data, style) in zip(axes, panels):
-        extra += _panel_frame(ax, domain, track_line, ptitle)
+        extra += _panel_frame(ax, domain, track_line, ptitle, overlays)
         if data is None:
             ax.text(0.5, 0.5, "unavailable", ha="center", va="center",
                     transform=ax.transAxes)
@@ -304,11 +350,17 @@ def plot_regrid(case):
         panels = [k for k in panels if k != "compare-anomaly"]
     print(f"Panels:       {', '.join(panels)}")
 
+    # The regridded files carry the verification grid, so the plots can be
+    # framed on it and outline it without re-reading the grid JSON.
+    glat, glon, _ = met_regrid.read_regridded(
+        cfg.output_path(sources[0], timestamps[0]))
+    overlays = grid_overlays(glat, glon, case.wofs_domains)
+
     out = case.regrid_plot_dir
     # compare-regrid is the common single-product case, so its maps go
     # straight into out_dir; the multi-product panels keep subfolders.
     dirs = {k: (out if k == "compare-regrid" else out / k) for k in panels}
-    domains = {"full": case.domain}
+    domains = {"full": centred_domain(glat, glon)}
     if case.zoom_domain:
         domains["zoom"] = case.zoom_domain
     grid_desc = f"{cfg.grid_name} grid ({cfg.method})"
@@ -357,7 +409,8 @@ def plot_regrid(case):
                     domain, track_line,
                     f"{label} 1-h precipitation, {valid}: native vs "
                     f"{grid_desc}{_budget_note(budget, t, source)}",
-                    dirs["compare-regrid"] / f"{source}_{dname}_{stamp}.png")
+                    dirs["compare-regrid"] / f"{source}_{dname}_{stamp}.png",
+                    overlays=overlays)
 
         rlat, rlon, _ = next(iter(regridded.values()))
         cut = cuts["regrid", "full"]
@@ -365,9 +418,10 @@ def plot_regrid(case):
             map_figure(
                 [(LABELS[s], *_cropped(*regridded[s], cut), "qpf")
                  for s in sources],
-                case.domain, track_line,
+                domains["full"], track_line,
                 f"Regridded 1-h precipitation on the {grid_desc}, {valid}",
-                dirs["compare-products"] / f"products_full_{stamp}.png")
+                dirs["compare-products"] / f"products_full_{stamp}.png",
+                overlays=overlays)
 
         if "compare-anomaly" in panels and TRUTH in regridded:
             truth = regridded[TRUTH][2]
@@ -379,10 +433,11 @@ def plot_regrid(case):
                                    *_cropped(rlat, rlon,
                                              truth - regridded[s][2], cut),
                                    "diff"))
-            map_figure(panels, case.domain, track_line,
+            map_figure(panels, domains["full"], track_line,
                        f"1-h precipitation anomaly vs {LABELS[TRUTH]}, "
                        f"{grid_desc}, {valid}",
-                       dirs["compare-anomaly"] / f"anomaly_full_{stamp}.png")
+                       dirs["compare-anomaly"] / f"anomaly_full_{stamp}.png",
+                       overlays=overlays)
         print(f"  [{i:>3}/{len(timestamps)}] {t:%Y-%m-%d %HZ}  plotted "
               f"(+{time.monotonic() - started:.0f}s)", flush=True)
     print(f"\nSaved maps under {out}")

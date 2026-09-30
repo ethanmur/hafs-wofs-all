@@ -4,28 +4,35 @@ C1, the observation-validity mask. Stage IV is a CONUS product: it covers US
 land and thins out offshore, so a verification region that reaches past its
 coverage counts cells where there is no truth. Those cells are missing rather
 than zero, which quietly removes them from some statistics and not others.
-This module draws the region where Stage IV can be trusted -- US land, plus a
-fixed distance out over water -- so every other masking region can be
-intersected with it.
+This module draws the region where Stage IV can be trusted -- the North
+American landmass, plus a fixed distance out over water -- so every other
+masking region can be intersected with it.
 
 The construction:
 
-  1. Rasterise US land onto the grid from Natural Earth state polygons
-     (the `_lakes` variant, so the Great Lakes are not land).
-  2. Rasterise all land, to tell water from foreign land.
-  3. Distance-transform the US-land raster, in cells, and scale by the grid
+  1. Rasterise mainland land onto the grid from Natural Earth state and
+     province polygons for the US, Canada and Mexico (the `_lakes` variant,
+     so the Great Lakes are not land).
+  2. Rasterise all land, to tell water from the land masses left out.
+  3. Distance-transform the mainland raster, in cells, and scale by the grid
      spacing. This is only valid because the verification grid is Lambert at
      a near-constant km spacing -- the same property the FSS neighbourhoods
      rely on. On a lat/lon grid the distance would be wrong away from the
      reference latitude.
-  4. mask = US land, OR (within buffer_km of US land AND over water).
+  4. mask = mainland land, OR (within buffer_km of it AND over water).
 
 Point 4 is why nothing here is coast-specific: the mask is distance-to-land,
 not distance-to-a-named-coastline, so the Atlantic, Gulf and Pacific coasts
 are all handled by the same transform, and an East Pacific case needs no
-different treatment. Excluding foreign land matters for the Gulf and southwest
-cases, where a 150 km buffer around US land would otherwise sweep in parts of
-Mexico, Cuba and the Bahamas that Stage IV never observes.
+different treatment.
+
+Canada and Mexico are included with the US rather than excluded. Radar
+coverage thins across the border, but cutting the analysis region at a
+political line looks like an artefact and splits contiguous rainfall in the
+Texas and Pacific Northwest cases. The island nations stay excluded: Cuba,
+Hispaniola and the Bahamas sit inside the buffer for Gulf and Florida cases
+but are far enough from the US radar network that Stage IV genuinely reports
+nothing there, so keeping them would add cells with no truth.
 """
 
 import sys
@@ -67,25 +74,30 @@ def mask_config_from_dict(cfg):
         out_dir=Path(cfg["out_dir"]) if cfg.get("out_dir") else None)
 
 
-def _land_geometry(scale, us_only):
-    """Unioned land polygons: US states only, or every land mass."""
+# Countries whose land counts as covered: the North American mainland.
+MAINLAND_ADMINS = ("United States of America", "Canada", "Mexico",
+                   "USA", "CAN", "MEX")
+
+
+def _land_geometry(scale, mainland):
+    """Unioned land polygons: the North American mainland, or every land mass."""
     import shapely
     from cartopy.io import shapereader
-    if us_only:
+    if mainland:
         path = shapereader.natural_earth(
             resolution=scale, category="cultural",
             name="admin_1_states_provinces_lakes")
         geoms = [rec.geometry for rec in shapereader.Reader(path).records()
                  if (rec.attributes.get("admin")
-                     or rec.attributes.get("adm0_a3", "")) in
-                 ("United States of America", "USA")]
+                     or rec.attributes.get("adm0_a3", "")) in MAINLAND_ADMINS]
     else:
         path = shapereader.natural_earth(resolution=scale,
                                          category="physical", name="land")
         geoms = list(shapereader.Reader(path).geometries())
     if not geoms:
         raise RuntimeError(
-            f"no {'US state' if us_only else 'land'} polygons found in the "
+            f"no {'mainland state' if mainland else 'land'} polygons found "
+            f"in the "
             f"Natural Earth {scale} data")
     return shapely.union_all(shapely.GeometryCollection(geoms))
 
@@ -109,23 +121,23 @@ def coastal_valid_mask(spec, buffer_km=DEFAULT_BUFFER_KM,
     from scipy.ndimage import distance_transform_edt
     if lat is None or lon is None:
         lat, lon = vg.grid_latlon(spec)
-    us_land = _rasterise(_land_geometry(scale, us_only=True), lat, lon)
-    all_land = _rasterise(_land_geometry(scale, us_only=False), lat, lon)
+    land = _rasterise(_land_geometry(scale, mainland=True), lat, lon)
+    all_land = _rasterise(_land_geometry(scale, mainland=False), lat, lon)
     water = ~all_land
-    # Distance in cells to the nearest US-land cell, scaled to km. Valid
+    # Distance in cells to the nearest mainland cell, scaled to km. Valid
     # because the grid spacing is near-constant by construction.
-    dist_km = distance_transform_edt(~us_land) * spec.res_km
+    dist_km = distance_transform_edt(~land) * spec.res_km
     within = dist_km <= buffer_km
-    mask = us_land | (within & water)
+    mask = land | (within & water)
     detail = {
-        "us_land": us_land,
+        "land": land,
         "all_land": all_land,
         "dist_km": dist_km,
         "n_total": int(mask.size),
         "n_mask": int(mask.sum()),
-        "n_us_land": int(us_land.sum()),
+        "n_land": int(land.sum()),
         "n_offshore": int((within & water).sum()),
-        "n_foreign_land_excluded": int((within & all_land & ~us_land).sum()),
+        "n_island_land_excluded": int((within & all_land & ~land).sum()),
     }
     return mask, detail
 
@@ -154,8 +166,9 @@ def write_mask_netcdf(path, spec, mask, lat, lon, name=MASK_NAME,
         var[:] = values
         var.long_name = "observation validity mask"
         var.units = "none"
-        var.description = (f"1 where Stage IV coverage is trusted: US land, "
-                           f"or water within {buffer_km:g} km of US land")
+        var.description = (f"1 where Stage IV coverage is trusted: North "
+                           f"American mainland land, or water within "
+                           f"{buffer_km:g} km of it")
         # MET NetCDF grid definition (Lambert conformal).
         nc.Projection = "Lambert Conformal"
         nc.scale_lat_1 = f"{spec.lat_1:.6f} degrees_north"
@@ -186,11 +199,11 @@ def plot_mask(spec, mask, detail, lat, lon, out_path, track=None,
     from matplotlib.patches import Patch, Rectangle
     from compare import _add_us_geography
 
-    # 0 outside, 1 offshore buffer, 2 US land, 3 foreign land excluded
+    # 0 outside, 1 offshore buffer, 2 mainland land, 3 island land excluded
     code = np.zeros(mask.shape)
     code[mask] = 1.0
-    code[detail["us_land"]] = 2.0
-    excluded = detail["all_land"] & ~detail["us_land"]
+    code[detail["land"]] = 2.0
+    excluded = detail["all_land"] & ~detail["land"]
     code[excluded & (detail["dist_km"] <= buffer_km)] = 3.0
     # Okabe-Ito; no red/green pairing
     cmap = ListedColormap(["#f2f2f2", "#56b4e9", "#0072b2", "#e69f00"])
@@ -231,13 +244,14 @@ def plot_mask(spec, mask, detail, lat, lon, out_path, track=None,
 
     pct = 100.0 * detail["n_mask"] / detail["n_total"]
     handles = [
-        Patch(facecolor="#0072b2", label=f"US land ({detail['n_us_land']:,})"),
+        Patch(facecolor="#0072b2",
+              label=f"mainland land ({detail['n_land']:,})"),
         Patch(facecolor="#56b4e9",
               label=f"water within {buffer_km:g} km "
                     f"({detail['n_offshore']:,})"),
         Patch(facecolor="#e69f00",
-              label=f"foreign land excluded "
-                    f"({detail['n_foreign_land_excluded']:,})"),
+              label=f"island land excluded "
+                    f"({detail['n_island_land_excluded']:,})"),
         Patch(facecolor="#f2f2f2", edgecolor="#999999",
               label="outside the mask"),
         Line2D([], [], color="#444444", linewidth=2.0,
@@ -282,7 +296,7 @@ def build_masks_case(case):
     print(f"Case   : {case.storm_name}  ({case.case_slug})")
     print(f"Grid   : {spec.nx} x {spec.ny} @ {spec.res_km:g} km  "
           f"({spec.n_cells:,} cells)  from {spec_path.name}")
-    print(f"Buffer : {cfg.coast_buffer_km:g} km offshore of US land  "
+    print(f"Buffer : {cfg.coast_buffer_km:g} km offshore of mainland land  "
           f"(Natural Earth {cfg.ne_scale})", flush=True)
 
     lat, lon = vg.grid_latlon(spec)
@@ -291,11 +305,11 @@ def build_masks_case(case):
     pct = 100.0 * detail["n_mask"] / detail["n_total"]
     print(f"Mask   : {detail['n_mask']:,} of {detail['n_total']:,} cells "
           f"({pct:.1f}%)")
-    print(f"  US land            {detail['n_us_land']:,}")
+    print(f"  mainland land      {detail['n_land']:,}")
     print(f"  offshore buffer    {detail['n_offshore']:,}")
-    print(f"  foreign land cut   {detail['n_foreign_land_excluded']:,}")
+    print(f"  island land cut    {detail['n_island_land_excluded']:,}")
     if detail["n_mask"] == 0:
-        print("  WARNING: the mask is empty -- no US land within the grid?")
+        print("  WARNING: the mask is empty -- no mainland land in the grid?")
 
     out_dir = Path(cfg.out_dir or case.out_dir)
     nc_path = write_mask_netcdf(
