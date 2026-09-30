@@ -13,7 +13,7 @@ best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal102023.dat
 # which draws the whole track so the landfall window can be chosen from the
 # map; the grid is built from the track INSIDE this window, so leaving it wide
 # makes the grid far larger than it needs to be.
-valid_start: 2023083000
+valid_start: 2023083018
 valid_end:   2023083106
 
 # TODO (optional): model cycles to pull, independent of the scoring window.
