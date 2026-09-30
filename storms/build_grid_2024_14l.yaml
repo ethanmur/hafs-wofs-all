@@ -64,12 +64,12 @@ regrid:
 # compare-anomaly need a second product and are skipped automatically.
 # `panels:` restricts the output -- drop it for everything available.
 regrid_plots:
-  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-obs/2024-14l/
+  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-stage-iv-plots/2024-14l/
   panels: [compare-regrid]
   # zoom_domain is [lat_min, lat_max, lon_min, lon_max] for the close-up that
   # shows small-scale changes the wide view cannot. Pick a box over the
   # heaviest rain; delete it to skip the zoom maps.
-  # zoom_domain: [lat_min, lat_max, lon_min, lon_max]
+  zoom_domain: [27, 28, -82.5, -81.5]
 
 verification_grid:
   res_km: 6.0
