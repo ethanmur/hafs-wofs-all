@@ -1,6 +1,6 @@
 """Single entry point for the HAFS QPF/ETS framework.
 
-    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid]
+    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid|build-masks]
 
 Loads a StormCase from the YAML case file and runs the requested product(s):
   parent  nest + parent QPF vs MRMS + Stage IV 4-panel figure
@@ -31,6 +31,10 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
                 inside the valid window, write <out_dir>/<case>_grid.json
                 with the MET grid spec, and draw the sanity map (grid outline,
                 track by ATCF status, statistics swath, WoFS box)
+  build-masks   the observation-validity mask on this case's grid: US land
+                plus a fixed buffer offshore, with foreign land excluded.
+                Writes <out_dir>/<case>_mask_coastal.{nc,png}; needs
+                build-grid to have run (same YAML)
 """
 
 import sys
@@ -40,9 +44,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
             "compare", "replot", "download-obs", "regrid-obs",
-            "plot-regrid", "stats-regrid", "build-grid")
+            "plot-regrid", "stats-regrid", "build-grid", "build-masks")
 OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "stats-regrid",
-                "build-grid")
+                "build-grid", "build-masks")
 
 
 def parse_args(argv):
@@ -50,7 +54,8 @@ def parse_args(argv):
     if not argv:
         print("usage: run.py <case.yaml> "
               "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|"
-              "download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid]")
+              "download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid|"
+              "build-masks]")
         raise SystemExit(2)
     yaml_path = argv[0]
     command = argv[1] if len(argv) > 1 else "all"
@@ -90,6 +95,10 @@ def _run_obs(obs_cases, obs_case, command):
     if command == "build-grid":
         from verification_grid import build_grid_case
         build_grid_case(obs_case)
+        return
+    if command == "build-masks":
+        from masks import build_masks_case
+        build_masks_case(obs_case)
         return
     {"download-obs": obs_cases.download_obs,
      "regrid-obs": obs_cases.regrid_obs}[command](obs_case)

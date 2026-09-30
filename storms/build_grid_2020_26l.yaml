@@ -74,6 +74,17 @@ regrid_plots:
   # heaviest rain; delete it to skip the zoom maps.
   # zoom_domain: [lat_min, lat_max, lon_min, lon_max]
 
+# Observation-validity mask (build-masks). Stage IV covers US land and thins
+# out offshore, so this marks where there is truth to verify against: US land
+# plus coast_buffer_km of water beyond it, with foreign land excluded (a
+# buffer around US land would otherwise sweep in Mexico, Cuba and the
+# Bahamas, which Stage IV never observes). Distance is measured to land, not
+# to a named coastline, so the Atlantic, Gulf and Pacific coasts all come out
+# of the same transform. Written to out_dir beside the grid.
+masks:
+  coast_buffer_km: 150.0
+  # ne_scale: 50m        # Natural Earth resolution for the land polygons
+
 verification_grid:
   res_km: 6.0
   pad_km: 750.0          # how far the GRID extends past the trimmed track
