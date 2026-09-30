@@ -152,7 +152,12 @@ def _all_missing_hint(cmd, config, kept=None):
         f"geometry is right and the interpolation is the suspect "
         f"({config.method}, width {config.width}, vld_thresh "
         f"{config.vld_thresh}).\n"
-        f"Fastest discriminator -- rerun by hand with nearest-neighbour:\n"
+        f"Check the sign convention first: MET's 'Input grid:' and 'Output "
+        f"grid:' lines must print Lon_orient with the SAME sign for two grids "
+        f"on the same side of the Greenwich meridian. Opposite signs mean the "
+        f"spec put the grid in the wrong hemisphere, and every cell is then "
+        f"missing whatever the method.\n"
+        f"Otherwise, rerun by hand with nearest-neighbour:\n"
         f"  {quoted}\n"
         f"  * data appears  -> {config.method}/width is the problem. Try "
         f"`regrid: {{method: NEAREST, width: 1}}` in the YAML, or a larger "
@@ -208,7 +213,42 @@ def read_grid_json(path):
             "`run.py <case>.yaml build-grid` first.") from None
     if "met_spec" not in payload:
         raise KeyError(f"{path} has no 'met_spec'; is it a grid JSON?")
-    return _ensure_hemisphere(payload["met_spec"]), payload.get("name")
+    return (_ensure_hemisphere(_respec(payload, path)), payload.get("name"))
+
+
+def _respec(payload, path):
+    """The grid's MET spec, rebuilt if the JSON predates the current
+    longitude convention.
+
+    A stored spec written under a different sign convention would silently
+    place the grid in the wrong hemisphere, so the numeric parameters in the
+    JSON -- which are unambiguously east-positive -- win over the string.
+    """
+    import verification_grid as vg
+    stored = payload.get("met_lon_west_positive")
+    if stored is None or bool(stored) == vg.MET_LON_WEST_POSITIVE:
+        return payload["met_spec"]
+    needed = ("nx", "ny", "res_km", "lat_0", "lon_0", "lat_1", "lat_2",
+              "lat_ll", "lon_ll")
+    if any(k not in payload for k in needed):
+        raise KeyError(
+            f"{path} stores a MET spec written with "
+            f"met_lon_west_positive={stored}, but the code now uses "
+            f"{vg.MET_LON_WEST_POSITIVE} and the JSON lacks the parameters "
+            "needed to rebuild it. Re-run `build-grid` for this case.")
+    spec = vg.GridSpec(
+        name=payload.get("name") or "grid", nx=int(payload["nx"]),
+        ny=int(payload["ny"]), res_km=float(payload["res_km"]),
+        lat_0=float(payload["lat_0"]), lon_0=float(payload["lon_0"]),
+        lat_1=float(payload["lat_1"]), lat_2=float(payload["lat_2"]),
+        lat_ll=float(payload["lat_ll"]), lon_ll=float(payload["lon_ll"]),
+        x_ll_km=float(payload.get("x_ll_km", 0.0)),
+        y_ll_km=float(payload.get("y_ll_km", 0.0)),
+        rule=payload.get("rule", "")).met_spec
+    print(f"NOTE: rebuilt the MET grid spec from {path} for the current "
+          f"longitude convention (met_lon_west_positive="
+          f"{vg.MET_LON_WEST_POSITIVE})", flush=True)
+    return spec
 
 
 def _ensure_hemisphere(spec):

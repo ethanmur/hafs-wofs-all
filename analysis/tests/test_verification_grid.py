@@ -228,16 +228,16 @@ def test_build_grid_is_reproducible():
 
 # --- output ---------------------------------------------------------------
 
-def test_met_spec_is_west_positive():
+def test_met_spec_is_east_positive():
     cfg = grid_config_from_dict({})
     spec = build_grid(_track(range(0, 25, 6)), cfg)
     fields = spec.met_spec.split()
     assert fields[0] == "lambert"
     assert int(fields[1]) == spec.nx and int(fields[2]) == spec.ny
-    # MET grid specs take longitude as degrees WEST-positive, the opposite
-    # sign to lon_ll/lon_0 on the GridSpec itself
-    assert float(fields[4]) == -spec.lon_ll
-    assert float(fields[5]) == -spec.lon_0
+    # MET grid specs take longitude east-positive, as the GridSpec stores it
+    assert float(fields[4]) == spec.lon_ll
+    assert float(fields[5]) == spec.lon_0
+    assert float(fields[4]) < 0 and float(fields[5]) < 0   # western hemisphere
     assert float(fields[6]) == spec.res_km
     assert float(fields[7]) == R_EARTH_KM
     assert (float(fields[8]), float(fields[9])) == (spec.lat_1, spec.lat_2)

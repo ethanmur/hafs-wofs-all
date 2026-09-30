@@ -221,12 +221,18 @@ def grid_config_from_dict(cfg):
 
 R_EARTH_KM = 6371.2      # MET's default spherical earth radius for grid specs
 
-# MET's grid-specification strings take longitudes as degrees WEST-positive,
-# the opposite sign to every other longitude in this codebase. Flip this to
-# False if a regridded field lands in the wrong hemisphere -- the JSON output
-# also carries an unambiguous east-positive PROJ.4 string for Python use, so
-# only the MET string depends on this constant.
-MET_LON_WEST_POSITIVE = True
+# MET's grid-specification strings take longitudes EAST-positive (negative
+# for west), the same sign as everywhere else here, and MET negates them into
+# its own internal west-positive form.
+#
+# Established from MET's own debug output: regridding Stage IV, it printed the
+# HRAP input grid's centre meridian as "Lon_orient: 105.000" -- positive for
+# 105 W -- while printing a west-positive spec of ours as "Lon_orient:
+# -82.350". Same debug code, so positive means west internally, and our grid
+# had been placed at 82.35 E, over the Indian Ocean. Every output cell came
+# back missing for every method and width, which is the signature to watch
+# for: compare the sign of the two printed Lon_orient values.
+MET_LON_WEST_POSITIVE = False
 
 # Okabe-Ito, distinguishable under red-green colour blindness.
 STATUS_COLORS = {"DB": "#56b4e9", "TD": "#0072b2", "TS": "#e69f00",
