@@ -89,6 +89,7 @@ regrid_plots:
 # of the same transform. Written to out_dir beside the grid.
 masks:
   coast_buffer_km: 150.0
+  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/masks/correct/
   # ne_scale: 50m        # Natural Earth resolution for the land polygons
 
 verification_grid:

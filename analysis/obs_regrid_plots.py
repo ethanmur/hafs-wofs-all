@@ -19,6 +19,7 @@ Usage:
 import csv
 import math
 import time
+from pathlib import Path
 from datetime import timedelta
 
 import numpy as np
@@ -485,7 +486,9 @@ def plot_masked(case):
         for n in (mask_lib.MASK_NAME, mask_lib.SWATH_NAME,
                   mask_lib.WOFS_ANY_NAME) if n in regions]
 
-    out = case.regrid_plot_dir
+    # The clipped maps are a Phase C product, so they go beside the mask
+    # files when masks.out_dir is set, not with the regrid check plots.
+    out = Path((case.masks and case.masks.out_dir) or case.regrid_plot_dir)
     domains = {"full": centred_domain(glat, glon)}
     if case.zoom_domain:
         domains["zoom"] = case.zoom_domain
