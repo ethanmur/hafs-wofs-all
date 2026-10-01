@@ -108,6 +108,9 @@ def _draw_overlays(ax, overlays):
     if olat is not None:
         ax.plot(olon, olat, color=GRID_EDGE_COLOR, lw=1.6,
                 transform=ccrs.PlateCarree(), zorder=7)
+    for lat, lon, arr, colour in overlays.get("contours", []):
+        ax.contour(lon, lat, arr.astype(float), levels=[0.5], colors=[colour],
+                   linewidths=1.4, transform=ccrs.PlateCarree(), zorder=6)
     for lat0, lat1, lon0, lon1 in overlays.get("wofs", []):
         ax.add_patch(Rectangle(
             (lon0, lat0), lon1 - lon0, lat1 - lat0,
@@ -441,3 +444,83 @@ def plot_regrid(case):
         print(f"  [{i:>3}/{len(timestamps)}] {t:%Y-%m-%d %HZ}  plotted "
               f"(+{time.monotonic() - started:.0f}s)", flush=True)
     print(f"\nSaved maps under {out}")
+
+
+# =============================================================================
+# Masked obs (Phase C check)
+# =============================================================================
+
+def plot_masked(case):
+    """Regridded obs clipped to the Phase C intersection, hour by hour.
+
+    One panel per hour: the truth field with every cell outside
+    coastal_valid AND track_swath AND the live WoFS box blanked, with the
+    three region boundaries drawn over it. This is the field grid_stat will
+    actually accumulate counts from, so seeing it directly is the check that
+    the masks compose the way they are meant to.
+
+    The WoFS term is taken from the deployments live at each valid time, not
+    the all-hours union, so the clipped area moves with the deployment.
+    """
+    import masks as mask_lib
+    cfg = case.regrid
+    if cfg is None:
+        raise SystemExit("ERROR: plot-masked needs a `regrid:` block in the YAML")
+    timestamps = oc.hourly_timestamps(case.valid_start, case.valid_end)
+    sources = available_sources(case, timestamps, "plot-masked")
+    oc._print_case_header(case, "Plot masked obs", sources)
+
+    spec, regions, mlat, mlon, track_pts = mask_lib.case_regions(case)
+    glat, glon, _ = met_regrid.read_regridded(
+        cfg.output_path(sources[0], timestamps[0]))
+    if glat.shape != regions[mask_lib.VERIFY_NAME].shape:
+        raise SystemExit(
+            f"ERROR: the regridded obs are {glat.shape} but the masks are "
+            f"{regions[mask_lib.VERIFY_NAME].shape}. They must be on the same "
+            f"grid -- re-run build-grid, regrid-obs and build-masks for this "
+            f"case.")
+    overlays = grid_overlays(glat, glon, case.wofs_domains)
+    overlays["contours"] = [
+        (mlat, mlon, regions[n], mask_lib.REGION_COLORS[n])
+        for n in (mask_lib.MASK_NAME, mask_lib.SWATH_NAME,
+                  mask_lib.WOFS_ANY_NAME) if n in regions]
+
+    out = case.regrid_plot_dir
+    domains = {"full": centred_domain(glat, glon)}
+    if case.zoom_domain:
+        domains["zoom"] = case.zoom_domain
+    print(f"Regions:      " + ", ".join(
+        f"{n}={int(a.sum()):,}" for n, a in regions.items()))
+    print(f"Output:       {out}", flush=True)
+
+    track = parse_bdeck(case.best_track)
+    cuts = {}
+    started = time.monotonic()
+    for i, t in enumerate(timestamps, 1):
+        track_line = track_segment(track, case.valid_start, t)
+        mask, live = mask_lib.active_verify_mask(regions, case.wofs_domains, t)
+        note = (f"WoFS {', '.join(live)}" if live
+                else "no WoFS deployment live")
+        for source in sources:
+            rlat, rlon, rvals = met_regrid.read_regridded(
+                cfg.output_path(source, t))
+            clipped = np.where(mask, rvals, np.nan)
+            for dname, domain in domains.items():
+                if ("regrid", dname) not in cuts:
+                    cuts["regrid", dname] = crop_slices(
+                        rlat, rlon, domain,
+                        FULL_DOMAIN_MAX_CELLS if dname == "full" else None)
+                cut = cuts["regrid", dname]
+                map_figure(
+                    [(f"{LABELS[source]} clipped to {mask_lib.VERIFY_NAME} "
+                      f"({int(mask.sum()):,} cells)",
+                      *_cropped(rlat, rlon, clipped, cut), "qpf")],
+                    domain, track_line,
+                    f"{LABELS[source]} 1-h precipitation on the "
+                    f"{cfg.grid_name} grid, valid {t:%Y-%m-%d %HZ}, "
+                    f"masked to the verification region   |   {note}",
+                    out / f"{source}_masked_{dname}_{t:%Y%m%d%H}.png",
+                    overlays=overlays)
+        print(f"  [{i:>3}/{len(timestamps)}] {t:%Y-%m-%d %HZ}  {note}  "
+              f"(+{time.monotonic() - started:.0f}s)", flush=True)
+    print(f"\nSaved masked maps under {out}")
