@@ -77,6 +77,13 @@ hafs:
   # budget_check: true    # false skips the mass check and the native-file read
   # tolerance_pct: 2.0
 
+# Stage IV vs HAFS panels for eyeballing (plot-hafs, analysis step D5b). One
+# figure per 3 h window per cycle, zoomed to the WoFS deployment nearest in
+# time to that window; with no wofs_domains it falls back to the whole grid.
+hafs_plots:
+  out_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-stage-iv-hafs/2020-09l/
+  # init_hours: [0]       # cycles to draw; [0, 12] doubles the figure count
+
 # Maps of the regridded obs (plot-regrid). Only the regridded products are
 # plotted, so with truth_source alone this gives the Stage IV native-vs-
 # regridded panels in both the wide and zoom views, written straight into

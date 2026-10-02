@@ -1,6 +1,6 @@
 """Single entry point for the HAFS QPF/ETS framework.
 
-    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid|build-masks|plot-masked|list-windows|regrid-hafs]
+    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid|build-masks|plot-masked|list-windows|regrid-hafs|plot-hafs]
 
 Loads a StormCase from the YAML case file and runs the requested product(s):
   parent  nest + parent QPF vs MRMS + Stage IV 4-panel figure
@@ -43,6 +43,10 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
                 spans, read straight from the parent files and put on the
                 case grid in one pass (D3+D4); writes a window manifest CSV
                 and, unless hafs.budget_check is false, a mass check
+  plot-hafs     Stage IV vs HAFS 3 h precipitation, one panel per lead for
+                each 00Z cycle (hafs_plots.init_hours to change), zoomed to
+                the WoFS deployment nearest in time; needs regrid-hafs and
+                regrid-obs to have run
   plot-masked   the regridded obs clipped to the mask intersection, one map
                 per hour, with the three region boundaries drawn over it;
                 needs regrid-obs and build-masks to have run
@@ -56,10 +60,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 COMMANDS = ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
             "compare", "replot", "download-obs", "regrid-obs",
             "plot-regrid", "stats-regrid", "build-grid", "build-masks",
-            "plot-masked", "list-windows", "regrid-hafs")
+            "plot-masked", "list-windows", "regrid-hafs",
+            "plot-hafs")
 OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "stats-regrid",
                 "build-grid", "build-masks", "plot-masked",
-                "list-windows", "regrid-hafs")
+                "list-windows", "regrid-hafs", "plot-hafs")
 
 
 def parse_args(argv):
@@ -68,7 +73,7 @@ def parse_args(argv):
         print("usage: run.py <case.yaml> "
               "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|"
               "download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid|"
-              "build-masks|plot-masked|list-windows|regrid-hafs]")
+              "build-masks|plot-masked|list-windows|regrid-hafs|plot-hafs]")
         raise SystemExit(2)
     yaml_path = argv[0]
     command = argv[1] if len(argv) > 1 else "all"
@@ -108,6 +113,10 @@ def _run_obs(obs_cases, obs_case, command):
     if command == "build-grid":
         from verification_grid import build_grid_case
         build_grid_case(obs_case)
+        return
+    if command == "plot-hafs":
+        from hafs_obs_plots import plot_hafs_obs_case
+        plot_hafs_obs_case(obs_case)
         return
     if command == "regrid-hafs":
         from hafs_windows import regrid_hafs_case

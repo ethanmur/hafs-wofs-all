@@ -76,6 +76,8 @@ class ObsCase:
     wofs_domains: list = field(default_factory=list)
     grid: Optional[verification_grid.GridConfig] = None
     hafs: Optional[hafs_lib.HafsConfig] = None
+    hafs_plot_dir: Optional[Path] = None     # plot-hafs output root
+    hafs_plot_init_hours: tuple = ()         # which cycles to draw; () = 00Z
     masks: Optional[mask_lib.MaskConfig] = None
 
     @property
@@ -127,6 +129,14 @@ def from_yaml(yaml_path):
                                                  f" in {yaml_path}")
     except ValueError as err:
         raise ValueError(f"{err} in {yaml_path}") from None
+    hplots = cfg.get("hafs_plots") or {}
+    unknown = set(hplots) - {"out_dir", "init_hours"}
+    if unknown:
+        raise ValueError(f"unknown hafs_plots keys {sorted(unknown)} in "
+                         f"{yaml_path}")
+    init_hours = tuple(int(h) for h in (hplots.get("init_hours") or ()))
+    if any(h < 0 or h > 23 for h in init_hours):
+        raise ValueError(f"hafs_plots.init_hours must be 0-23 in {yaml_path}")
     truth_source = str(cfg.get("truth_source", "stage4")).lower()
     if truth_source not in met_regrid.SOURCES:
         raise ValueError(f"truth_source must be one of {met_regrid.SOURCES} "
@@ -169,6 +179,9 @@ def from_yaml(yaml_path):
         grid=grid,
         masks=mask_cfg,
         hafs=hafs_cfg,
+        hafs_plot_dir=(Path(hplots["out_dir"]) if hplots.get("out_dir")
+                       else out_dir / "hafs-compare"),
+        hafs_plot_init_hours=init_hours,
     )
 
 
