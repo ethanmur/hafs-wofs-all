@@ -66,6 +66,23 @@ regrid:
   vld_thresh: 0.5
   tolerance_pct: 2.0
 
+# HAFS source files for this case (regrid-hafs, analysis steps D3+D4). The 3 h
+# APCP bucket is read straight out of the parent files -- no intermediate
+# extraction -- and written on the verification grid from the `regrid:` block
+# above. root is searched recursively, so it can point at the case directory
+# and the per-cycle subdirectories are found automatically. storm_id keeps a
+# multistorm run from pulling the wrong cyclone.
+hafs:
+  root: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs/2023-09e/
+  cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs-regrid/2023-09e/
+  model: hfsa
+  storm_id: 09e
+  # field_spec: 'name="APCP"; level="A3";'   # the 3 h bucket, NOT the run total
+  # cycle_h: 6
+  # max_lead_h: 126
+  # budget_check: true    # false skips the mass check and the native-file read
+  # tolerance_pct: 2.0
+
 # Maps of the regridded obs (plot-regrid). Only the regridded products are
 # plotted, so with truth_source alone this gives the Stage IV native-vs-
 # regridded panels in both the wide and zoom views, written straight into

@@ -33,6 +33,7 @@ import met_regrid
 # aliased: a dataclass field named `masks` would shadow the
 # module inside the class body, where the assignment is bound
 # before the annotation is evaluated.
+import hafs_windows as hafs_lib
 import masks as mask_lib
 import verification_grid
 import stage4_hourly
@@ -74,6 +75,7 @@ class ObsCase:
     # WoFS is re-sited between events and a storm can have several.
     wofs_domains: list = field(default_factory=list)
     grid: Optional[verification_grid.GridConfig] = None
+    hafs: Optional[hafs_lib.HafsConfig] = None
     masks: Optional[mask_lib.MaskConfig] = None
 
     @property
@@ -121,6 +123,8 @@ def from_yaml(yaml_path):
             cfg.get("verification_grid"))
         wofs_domains = verification_grid.wofs_domains_from_cfg(cfg, yaml_path)
         mask_cfg = mask_lib.mask_config_from_dict(cfg.get("masks"))
+        hafs_cfg = hafs_lib.hafs_config_from_dict(cfg.get("hafs"),
+                                                 f" in {yaml_path}")
     except ValueError as err:
         raise ValueError(f"{err} in {yaml_path}") from None
     truth_source = str(cfg.get("truth_source", "stage4")).lower()
@@ -164,6 +168,7 @@ def from_yaml(yaml_path):
         wofs_domains=wofs_domains,
         grid=grid,
         masks=mask_cfg,
+        hafs=hafs_cfg,
     )
 
 
