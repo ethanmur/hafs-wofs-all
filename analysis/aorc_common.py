@@ -117,7 +117,7 @@ def sum_aorc_hours(window_start, window_end, domain, cache_dir, label="",
                    download=True):
     """Sum AORC hourly precip over (window_start, window_end].
 
-    Same end-of-hour convention as hafs_common.load_mrms_hour: an N-hour
+    Same end-of-hour convention as obs_cases.load_mrms_hour: an N-hour
     accumulation sums the N hourly fields stamped 1..N hours after the
     start, so an AORC daily sum lines up with a Stage IV 24h file's own
     12Z(D-1)->12Z(D) window when window_start/window_end are that window.

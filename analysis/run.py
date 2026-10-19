@@ -1,32 +1,24 @@
-"""Single entry point for the HAFS QPF/ETS framework.
+"""Single entry point for the HAFS/WoFS rainfall verification framework.
 
-    python analysis/run.py <case.yaml> [parent|ets|rmse|cycles|cycles-compare|all|compare|replot|download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid|build-masks|plot-masked|list-windows|regrid-hafs|plot-hafs]
+    python analysis/run.py <case.yaml> <command>
 
-Loads a StormCase from the YAML case file and runs the requested product(s):
-  parent  nest + parent QPF vs MRMS + Stage IV 4-panel figure
-  ets     the combined parent+nest ETS-vs-threshold figure + CSV
-  rmse    storm-total RMSE/MAE/bias/r scatter panels + CSV
-  cycles  per-initialization comparison on a common valid window (takes a cycles YAML)
-  cycles-compare compare HAFS-A/B/M cycle CSVs; missing models are allowed
-  all     parent + ets + rmse (fields built once; default)
-  compare HFSA-vs-HFSB rainfall comparison (takes a comparison YAML)
-  replot  redraw the comparison figures from existing CSVs (no recompute)
+Loads an ObsCase from the YAML case file and runs one command:
   download-obs  fetch/cache MRMS and AORC obs only -- no regridding or
                 plotting; run this on a login node. Stage IV hourly data is
                 NOT fetched here (see analysis/stage4_hourly.py); place it
-                in the cache yourself (takes an obs-case YAML)
+                in the cache yourself
   regrid-obs    regrid every cached obs hour onto the regrid.grid_template
                 grid with MET regrid_data_plane, cached as NetCDF, plus a
                 per-hour conservation check CSV; needs `module load met`
-                (takes an obs-case YAML with a `regrid:` block)
+                (needs a `regrid:` block)
   plot-regrid   hourly maps of the regrid-obs output: native vs regridded
                 (full + zoom domain) for each regridded product, plus, when
                 two or more are regridded, all products side by side and
                 anomalies vs AORC; `regrid_plots.panels` restricts which.
-                Reads the caches only (same YAML)
+                Reads the caches only
   stats-regrid  distributions and cell-by-cell 1:1 comparisons of the
                 regridded products, per hour and over the whole window,
-                land-only and including ocean, plus stats CSVs (same YAML)
+                land-only and including ocean, plus stats CSVs
   build-grid    build this case's common verification grid from the best track
                 inside the valid window, write <out_dir>/<case>_grid.json
                 with the MET grid spec, and draw the sanity map (grid outline,
@@ -35,13 +27,13 @@ Loads a StormCase from the YAML case file and runs the requested product(s):
                 validity (US land plus a fixed buffer beyond it),
                 the track swath, the WoFS boxes, and their intersection.
                 Writes <out_dir>/<case>_mask_*.nc plus two figures; needs
-                build-grid to have run (same YAML)
+                build-grid to have run
   list-windows  the 3 h absolute-clock verification windows for this case and
                 the HAFS/WoFS cycles that fully span each one, with leads;
                 reads no data, so it can be run before anything is staged
   regrid-hafs   the HAFS 3 h APCP buckets for every window a cycle fully
                 spans, read straight from the parent files and put on the
-                case grid in one pass (D3+D4); writes a window manifest CSV
+                case grid in one pass; writes a window manifest CSV
                 and, unless hafs.budget_check is false, a mass check
   plot-hafs     Stage IV vs HAFS 3 h precipitation, one panel per lead for
                 each 00Z cycle (hafs_plots.init_hours to change), zoomed to
@@ -57,48 +49,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-COMMANDS = ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
-            "compare", "replot", "download-obs", "regrid-obs",
-            "plot-regrid", "stats-regrid", "build-grid", "build-masks",
-            "plot-masked", "list-windows", "regrid-hafs",
-            "plot-hafs")
-OBS_COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "stats-regrid",
-                "build-grid", "build-masks", "plot-masked",
-                "list-windows", "regrid-hafs", "plot-hafs")
+COMMANDS = ("download-obs", "regrid-obs", "plot-regrid", "stats-regrid",
+            "build-grid", "build-masks", "plot-masked", "list-windows",
+            "regrid-hafs", "plot-hafs")
 
 
 def parse_args(argv):
-    """(yaml_path, command) from argv; command defaults to 'all'."""
-    if not argv:
-        print("usage: run.py <case.yaml> "
-              "[parent|ets|rmse|cycles|cycles-compare|all|compare|replot|"
-              "download-obs|regrid-obs|plot-regrid|stats-regrid|build-grid|"
-              "build-masks|plot-masked|list-windows|regrid-hafs|plot-hafs]")
+    """(yaml_path, command) from argv; the command is required."""
+    if len(argv) < 2:
+        print("usage: run.py <case.yaml> <command>\n"
+              f"commands: {' | '.join(COMMANDS)}")
         raise SystemExit(2)
-    yaml_path = argv[0]
-    command = argv[1] if len(argv) > 1 else "all"
+    yaml_path, command = argv[0], argv[1]
     if command not in COMMANDS:
         print(f"unknown command '{command}'; choose from {COMMANDS}")
         raise SystemExit(2)
     return yaml_path, command
-
-
-def dispatch(case, command):
-    """Run the requested product(s) for a loaded StormCase."""
-    from parent_qpf import generate_parent_figure
-    from ets_full import compute_ets, build_verification_fields
-    from rmse_scatter import compute_rmse
-    if command in ("parent", "all"):
-        generate_parent_figure(case)
-    if command == "ets":
-        compute_ets(case)
-    if command == "rmse":
-        compute_rmse(case)
-    if command == "all":
-        # Build the expensive verification fields once, share across products.
-        fields = build_verification_fields(case)
-        compute_ets(case, fields=fields)
-        compute_rmse(case, fields=fields)
 
 
 def _run_obs(obs_cases, obs_case, command):
@@ -141,44 +107,10 @@ def _run_obs(obs_cases, obs_case, command):
 def main(argv):
     yaml_path, command = parse_args(argv)
     import run_log
-    if command in OBS_COMMANDS:
-        import obs_cases
-        obs_case = obs_cases.from_yaml(yaml_path)
-        with run_log.tee(obs_case, command):
-            _run_obs(obs_cases, obs_case, command)
-        return
-    if command == "cycles-compare":
-        from cycles_compare import (load_cycles_comparison,
-                                    generate_cycles_comparison)
-        generate_cycles_comparison(load_cycles_comparison(yaml_path))
-        return
-    if command in ("compare", "replot"):
-        from compare import (load_comparison, generate_comparison,
-                             replot_from_csv)
-        cfg = load_comparison(yaml_path)
-        (generate_comparison if command == "compare" else replot_from_csv)(cfg)
-        return
-    if command == "cycles":
-        from hafs_case import cycles_from_yaml
-        from cycles import compute_cycles
-        ccase = cycles_from_yaml(yaml_path)
-        with run_log.tee(ccase, command):
-            print(f"Case   : {ccase.storm_name} ({ccase.model_label})")
-            print(f"Window : {ccase.valid_start:%Y-%m-%d %HZ} -> "
-                  f"{ccase.valid_end:%Y-%m-%d %HZ}  | "
-                  f"run_root: {ccase.run_root}")
-            print(f"Output : {ccase.out_dir}  | command: {command}")
-            compute_cycles(ccase)
-        return
-    from hafs_case import from_yaml
-    case = from_yaml(yaml_path)
-    with run_log.tee(case, command):
-        print(f"Case   : {case.storm_name} ({case.model_label})")
-        print(f"Init   : {case.init_dt:%Y-%m-%d %HZ}  | "
-              f"run_dir: {case.run_dir}")
-        print(f"Domain : {case.domain}  | track points: {len(case.track)}")
-        print(f"Output : {case.out_dir}  | command: {command}")
-        dispatch(case, command)
+    import obs_cases
+    obs_case = obs_cases.from_yaml(yaml_path)
+    with run_log.tee(obs_case, command):
+        _run_obs(obs_cases, obs_case, command)
 
 
 if __name__ == "__main__":

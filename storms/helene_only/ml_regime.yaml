@@ -1,8 +1,0 @@
-# Pooled ML regime diagnostics over ml_features.csv (grows as storms are added)
-features_csv: analysis/output/ml_features.csv
-out_dir: analysis/output/ml_regime
-targets: [ets_headline, fss_headline, rmse]
-min_samples_warn: 30
-# ML-only filter: retain earlier cycles and exclude the sharp near-landfall
-# verification regime. Cycle plots and ml_features.csv still keep every cycle.
-min_lead_hours_to_landfall: 24

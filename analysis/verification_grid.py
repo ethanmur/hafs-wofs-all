@@ -531,7 +531,7 @@ def plot_grid(spec, track, out_path, cfg, wofs_domains=None, title=None,
     import cartopy.crs as ccrs
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch, Rectangle
-    from compare import _add_us_geography
+    from plot_common import add_us_geography
 
     lat, lon = grid_latlon(spec)
     globe = ccrs.Globe(ellipse=None, semimajor_axis=R_EARTH_KM * 1000.0,
@@ -547,7 +547,7 @@ def plot_grid(spec, track, out_path, cfg, wofs_domains=None, title=None,
     ax.set_extent([lon.min() - margin, lon.max() + margin,
                    max(lat.min() - margin, -85.0),
                    min(lat.max() + margin, 85.0)], crs=plain)
-    _add_us_geography(ax)
+    add_us_geography(ax)
     ax.gridlines(draw_labels=True, linewidth=0.3, color="#bbbbbb",
                  alpha=0.7, linestyle=":")
 

@@ -1,7 +1,6 @@
 """NCEP Stage IV hourly QPE access (``ST4.<YYYYMMDD>`` source files).
 
-Distinct from parent_qpf.py's index_stage4_24h_conus/read_stage4, which read
-the water.noaa.gov *daily* tarball's per-region 24h-only file
+Not the water.noaa.gov *daily* tarball's per-region 24h-only file
 (``conus_YYYYMMDD_24h.grb2``). The files this module reads are NCEP's own
 combined archive format: one file per day, bundling the day's 1h, 6h, and
 24h APCP accumulations together, and repeating them on more than one grid.
@@ -100,8 +99,7 @@ def _stage4_1h_records(path_str):
     hypercube requires: all-NaN cells are dropped (they are fill for
     (time, step) combinations that hold no message, and would otherwise
     become a field of zeros, i.e. a fabricated dry hour), and where the
-    same hour appears on more than one grid the finest is kept, matching
-    parent_qpf.pick_cumulative_record's convention.
+    same hour appears on more than one grid the finest is kept.
     """
     best = {}
     for ds in cfgrib.open_datasets(path_str):

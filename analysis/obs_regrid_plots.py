@@ -30,12 +30,10 @@ import matplotlib.colors as mcolors
 from matplotlib.transforms import blended_transform_factory
 import cartopy.crs as ccrs
 
-from hafs_common import QPF_LEVELS
 from hafs_case import position_on_track
-from parent_qpf import qpf_cmap
 from plot_units import inches
 from best_track import parse_bdeck
-from compare import _add_us_geography
+from plot_common import add_us_geography, QPF_LEVELS, qpf_cmap
 import met_regrid
 import verification_grid as vg
 import obs_cases as oc
@@ -126,7 +124,7 @@ def _panel_frame(ax, domain, track_line, title, overlays=None):
     bbox_inches="tight" crops them off otherwise."""
     lat_min, lat_max, lon_min, lon_max = domain
     ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
-    _add_us_geography(ax)
+    add_us_geography(ax)
     gl = ax.gridlines(draw_labels=True, linewidth=0.4, linestyle="--",
                       alpha=0.5)
     gl.top_labels = gl.right_labels = False

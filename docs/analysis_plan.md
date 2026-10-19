@@ -103,11 +103,14 @@ stay, and move those helpers rather than leaving a dependency on dead code.
 - `hafs_common.py`, keeping only what a surviving module imports.
 - The matching tests, and the `run.py` subcommands `parent`, `ets`, `rmse`,
   `cycles`, `cycles-compare`, `all`, `compare`, `replot`.
-- Per-case grid YAMLs `storms/build_grid_*.yaml` and `storms/helene_only/`,
-  which describe the old scope. Their `domain`, `pad_km` and
-  `mask_radius_km` keys have no counterpart.
+- The HAFS-only configs in `storms/helene_only/`. The per-case grid YAMLs
+  `storms/build_grid_*.yaml` stay until A2 replaces them: they are still the
+  config for the surviving `build-grid` / `regrid-obs` commands.
+- Helpers that surviving modules used move out first: the US-geography overlay
+  and QPF colormap to `plot_common.py`, the MRMS download functions to
+  `obs_cases.py`.
 
-*Check:* `pytest` passes; `run.py --help` lists only the commands that remain;
+*Check:* `pytest` passes; `run.py` with no command lists only the commands that remain;
 no surviving module imports a deleted one.
 
 ### A1. WoFS deployment inventory

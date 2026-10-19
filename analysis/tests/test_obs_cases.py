@@ -16,8 +16,8 @@ import yaml
 
 from obs_cases import (
     ObsCase, from_yaml, hourly_timestamps, check_cache_complete,
+    mrms_s3_key,
 )
-from hafs_common import mrms_s3_key
 import aorc_common
 import stage4_hourly
 

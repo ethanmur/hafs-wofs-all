@@ -12,6 +12,8 @@ Usage:
 """
 
 import csv
+import gzip
+import io
 import sys
 import time
 from dataclasses import dataclass, field
@@ -21,13 +23,13 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import cfgrib
 import numpy as np
 import yaml
 from botocore import UNSIGNED
 from botocore.config import Config
 import boto3
 
-from hafs_common import load_mrms_hour, mrms_s3_key
 import aorc_common
 import met_regrid
 # aliased: a dataclass field named `masks` would shadow the
@@ -37,6 +39,49 @@ import hafs_windows as hafs_lib
 import masks as mask_lib
 import verification_grid
 import stage4_hourly
+
+
+# =============================================================================
+# MRMS downloader / cache
+# =============================================================================
+
+MRMS_BUCKET = "noaa-mrms-pds"
+MRMS_PRODUCT = "MultiSensor_QPE_01H_Pass2_00.00"
+
+
+def mrms_s3_key(hour_end_dt):
+    date_str = hour_end_dt.strftime("%Y%m%d")
+    time_str = hour_end_dt.strftime("%Y%m%d-%H%M%S")
+    fname = f"MRMS_{MRMS_PRODUCT}_{time_str}.grib2.gz"
+    return f"CONUS/{MRMS_PRODUCT}/{date_str}/{fname}", fname
+
+
+def load_mrms_hour(s3, hour_end_dt, cache_dir, download=True):
+    """(lat, lon, data) for one MRMS hour. On a cache miss: downloads from
+    S3 when `download` is True (the default); raises FileNotFoundError
+    instead of touching `s3` when `download` is False, for callers that
+    must not download (e.g. a no-internet compute node)."""
+    cache_dir = Path(cache_dir)
+    key, fname = mrms_s3_key(hour_end_dt)
+    cache_path = cache_dir / fname.replace(".gz", "")
+    if not cache_path.exists():
+        if not download:
+            raise FileNotFoundError(
+                f"MRMS hour not cached: {cache_path} -- regrid-obs does "
+                f"not download; run 'download-obs' for this case first.")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        gz_buf = io.BytesIO()
+        s3.download_fileobj(MRMS_BUCKET, key, gz_buf)
+        gz_buf.seek(0)
+        raw = gzip.decompress(gz_buf.read())
+        cache_path.write_bytes(raw)
+    datasets = cfgrib.open_datasets(str(cache_path))
+    for ds in datasets:
+        for var in ds.data_vars:
+            da = ds[var]
+            data = np.where(da.values < 0, 0.0, da.values)
+            return da.latitude.values, da.longitude.values, data
+    raise RuntimeError(f"No variable in {cache_path}")
 
 
 # =============================================================================

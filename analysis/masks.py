@@ -349,7 +349,7 @@ def plot_mask(spec, mask, detail, lat, lon, out_path, track=None,
     from matplotlib.colors import ListedColormap, BoundaryNorm
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch, Rectangle
-    from compare import _add_us_geography
+    from plot_common import add_us_geography
 
     # 0 outside, 1 buffer over water, 2 US land, 3 buffer over foreign land,
     # 4 detached land mass cut out of the buffer
@@ -378,7 +378,7 @@ def plot_mask(spec, mask, detail, lat, lon, out_path, track=None,
                    min(lat.max() + margin, 85.0)], crs=plain)
     ax.pcolormesh(lon, lat, code, transform=plain, cmap=cmap, norm=norm,
                   shading="nearest", zorder=1)
-    _add_us_geography(ax)
+    add_us_geography(ax)
     ax.gridlines(draw_labels=True, linewidth=0.3, color="#bbbbbb", alpha=0.7,
                  linestyle=":")
 
@@ -439,7 +439,7 @@ def plot_regions(spec, regions, lat, lon, out_path, track=None,
     import cartopy.crs as ccrs
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
-    from compare import _add_us_geography
+    from plot_common import add_us_geography
 
     globe = ccrs.Globe(ellipse=None, semimajor_axis=vg.R_EARTH_KM * 1000.0,
                        semiminor_axis=vg.R_EARTH_KM * 1000.0)
@@ -459,7 +459,7 @@ def plot_regions(spec, regions, lat, lon, out_path, track=None,
     ax.pcolormesh(lon, lat, np.where(verify, 1.0, np.nan), transform=plain,
                   cmap=matplotlib.colors.ListedColormap(["#e69f00"]),
                   shading="nearest", alpha=0.35, zorder=1)
-    _add_us_geography(ax)
+    add_us_geography(ax)
     ax.gridlines(draw_labels=True, linewidth=0.3, color="#bbbbbb", alpha=0.7,
                  linestyle=":")
 

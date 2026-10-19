@@ -7,14 +7,17 @@ import run
 from run import parse_args
 
 
-def test_parse_args_defaults_to_all():
-    yaml_path, command = run.parse_args(["case.yaml"])
-    assert yaml_path == "case.yaml" and command == "all"
+def test_parse_args_requires_command():
+    try:
+        run.parse_args(["case.yaml"])
+        assert False, "expected SystemExit"
+    except SystemExit:
+        pass
 
 
 def test_parse_args_explicit_command():
-    yaml_path, command = run.parse_args(["case.yaml", "ets"])
-    assert command == "ets"
+    yaml_path, command = run.parse_args(["case.yaml", "regrid-obs"])
+    assert yaml_path == "case.yaml" and command == "regrid-obs"
 
 
 def test_parse_args_rejects_unknown_command():
@@ -25,26 +28,14 @@ def test_parse_args_rejects_unknown_command():
         pass
 
 
-def test_parse_args_accepts_compare():
-    yaml_path, command = run.parse_args(["storms/helene_compare.yaml", "compare"])
-    assert command == "compare"
-
-
-def test_parse_args_accepts_rmse():
-    yaml_path, command = run.parse_args(["case.yaml", "rmse"])
-    assert command == "rmse"
-
-
-def test_parse_args_accepts_cycles():
-    yaml_path, command = parse_args(["case.yaml", "cycles"])
-    assert yaml_path == "case.yaml"
-    assert command == "cycles"
-
-
-def test_parse_args_accepts_cycles_compare():
-    yaml_path, command = parse_args(["compare.yaml", "cycles-compare"])
-    assert yaml_path == "compare.yaml"
-    assert command == "cycles-compare"
+def test_parse_args_rejects_removed_hafs_only_commands():
+    for command in ("parent", "ets", "rmse", "cycles", "cycles-compare",
+                    "all", "compare", "replot"):
+        try:
+            run.parse_args(["case.yaml", command])
+            assert False, f"{command} should be rejected"
+        except SystemExit:
+            pass
 
 
 def _run_all():
