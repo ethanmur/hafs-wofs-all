@@ -244,7 +244,7 @@ def _respec(payload, path):
         lat_ll=float(payload["lat_ll"]), lon_ll=float(payload["lon_ll"]),
         x_ll_km=float(payload.get("x_ll_km", 0.0)),
         y_ll_km=float(payload.get("y_ll_km", 0.0)),
-        rule=payload.get("rule", "")).met_spec
+        source=payload.get("source", "")).met_spec
     print(f"NOTE: rebuilt the MET grid spec from {path} for the current "
           f"longitude convention (met_lon_west_positive="
           f"{vg.MET_LON_WEST_POSITIVE})", flush=True)

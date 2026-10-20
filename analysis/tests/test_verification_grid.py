@@ -1,4 +1,5 @@
-"""Unit tests for the verification-grid configuration block.
+"""Unit tests for the verification grid: the WoFS-domain builder and the
+legacy case-configuration block.
 
 Run directly:   python3 analysis/tests/test_verification_grid.py
 Or via pytest:  pytest analysis/tests/test_verification_grid.py -v
@@ -9,13 +10,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest
+
 from verification_grid import (GridConfig, grid_config_from_dict,
-                               trim_track, derive_projection,
-                               build_grid, grid_latlon,
+                               trim_track, grid_latlon,
                                spacing_report, grid_to_dict,
                                wofs_domains_from_cfg,
                                active_domains, WofsDomain,
-                               R_EARTH_KM)
+                               aggregation_factor, wofs_grid_spec,
+                               offset_from_file_km, R_EARTH_KM)
 
 
 def test_defaults_when_block_absent():
@@ -126,137 +129,11 @@ def test_trim_track_can_be_empty():
 
 # --- projection -----------------------------------------------------------
 
-def test_derive_projection_insets_standard_parallels():
-    proj = derive_projection((20.0, 44.0, -100.0, -70.0))
-    assert proj["lat_0"] == 32.0 and proj["lon_0"] == -85.0
-    # one sixth of the 24-degree span inset from each end
-    assert proj["lat_1"] == 24.0 and proj["lat_2"] == 40.0
-
-
-def test_derive_projection_narrow_domain_falls_back():
-    proj = derive_projection((30.0, 33.0, -90.0, -85.0))
-    assert proj["lat_1"] < proj["lat_2"]
-    assert proj["lat_1"] == 29.5 and proj["lat_2"] == 33.5
-
-
-def test_derive_projection_rejects_hemispheric_span():
-    try:
-        derive_projection((10.0, 50.0, -170.0, 40.0))
-    except ValueError as err:
-        assert "180 degrees" in str(err)
-        return
-    raise AssertionError("expected ValueError")
-
 
 # --- grid construction ----------------------------------------------------
 
-def test_build_grid_from_track_and_spacing_is_even():
-    cfg = grid_config_from_dict({})
-    spec = build_grid(_track(range(0, 49, 6)), cfg)
-    assert spec.rule == "track"
-    assert spec.res_km == 6.0 and spec.nx > 0 and spec.ny > 0
-    report = spacing_report(spec)
-    # the whole point of Lambert with two standard parallels
-    assert report["worst_pct"] < 2.0
-    lat, lon = grid_latlon(spec)
-    assert lat.shape == (spec.ny, spec.nx) == lon.shape
-
-
-def test_build_grid_pad_sets_the_extent():
-    cfg = grid_config_from_dict({})
-    track = _track([0])                      # a single fix
-    spec = build_grid(track, cfg)
-    # a lone point padded by 750 km either side spans ~1500 km = 250 cells
-    assert 248 <= spec.nx <= 254 and 248 <= spec.ny <= 254
-
-
-def test_build_grid_unions_the_wofs_box():
-    cfg = grid_config_from_dict({})
-    track = _track(range(0, 25, 6))
-    plain = build_grid(track, cfg)
-    with_wofs = build_grid(track, cfg,
-                           wofs_domains=(40.0, 46.0, -80.0, -74.0))
-    assert with_wofs.rule == "track+wofs"
-    assert with_wofs.n_cells > plain.n_cells
-    lat, lon = grid_latlon(with_wofs)
-    assert lat.max() >= 46.0 and lon.max() >= -74.0
-
-
-def test_build_grid_domain_override_wins():
-    cfg = grid_config_from_dict({"domain_override": [30.0, 36.0, -92.0, -86.0]})
-    spec = build_grid(_track(range(0, 49, 6)), cfg,
-                      wofs_domains=(10.0, 12.0, -60.0, -58.0))
-    assert spec.rule == "domain_override"
-    lat, lon = grid_latlon(spec)
-    # no pad and neither the track nor the WoFS box widen it
-    assert lat.min() > 28.0 and lat.max() < 38.0
-    assert lon.min() > -94.0 and lon.max() < -84.0
-
-
-def test_build_grid_wofs_only_when_no_track_survives():
-    cfg = grid_config_from_dict({})
-    spec = build_grid([], cfg, wofs_domains=(31.0, 39.0, -87.0, -79.0))
-    assert spec.rule == "wofs-only"
-    assert spec.nx > 0 and spec.ny > 0
-
-
-def test_build_grid_needs_something_to_bound():
-    try:
-        build_grid([], grid_config_from_dict({}))
-    except ValueError as err:
-        assert "nothing to build a grid from" in str(err)
-        return
-    raise AssertionError("expected ValueError")
-
-
-def test_build_grid_max_cells_guard():
-    cfg = grid_config_from_dict({"max_cells": 100})
-    try:
-        build_grid(_track(range(0, 145, 6)), cfg)
-    except ValueError as err:
-        assert "max_cells" in str(err)
-        return
-    raise AssertionError("expected ValueError")
-
-
-def test_build_grid_is_reproducible():
-    cfg = grid_config_from_dict({})
-    track = _track(range(0, 49, 6))
-    a, b = build_grid(track, cfg), build_grid(track, cfg)
-    assert a == b
-
 
 # --- output ---------------------------------------------------------------
-
-def test_met_spec_is_east_positive():
-    cfg = grid_config_from_dict({})
-    spec = build_grid(_track(range(0, 25, 6)), cfg)
-    fields = spec.met_spec.split()
-    assert fields[0] == "lambert"
-    assert int(fields[1]) == spec.nx and int(fields[2]) == spec.ny
-    # MET grid specs take longitude east-positive, as the GridSpec stores it
-    assert float(fields[4]) == spec.lon_ll
-    assert float(fields[5]) == spec.lon_0
-    assert float(fields[4]) < 0 and float(fields[5]) < 0   # western hemisphere
-    assert float(fields[6]) == spec.res_km
-    assert float(fields[7]) == R_EARTH_KM
-    assert (float(fields[8]), float(fields[9])) == (spec.lat_1, spec.lat_2)
-    # MET needs the hemisphere, as a single letter, after the parallels
-    assert fields[10] == "N"
-
-
-def test_proj4_is_east_positive():
-    spec = build_grid(_track(range(0, 25, 6)), grid_config_from_dict({}))
-    assert f"+lon_0={spec.lon_0}" in spec.proj4
-    assert "+proj=lcc" in spec.proj4
-
-
-def test_grid_to_dict_carries_the_spec_and_report():
-    spec = build_grid(_track(range(0, 25, 6)), grid_config_from_dict({}))
-    payload = grid_to_dict(spec, spacing_report(spec), extra={"case": "x"})
-    for key in ("nx", "ny", "met_spec", "proj4", "rule", "spacing_km",
-                "case", "met_lon_west_positive"):
-        assert key in payload, key
 
 
 # --- multiple WoFS deployments -------------------------------------------
@@ -329,29 +206,6 @@ def test_active_domains_selects_by_valid_time():
     assert active_domains(doms, datetime(2024, 7, 9, 0)) == []
 
 
-def test_build_grid_unions_every_deployment():
-    cfg = grid_config_from_dict({})
-    track = _track(range(0, 25, 6))
-    doms = wofs_domains_from_cfg(_WOFS_CFG)
-    spec = build_grid(track, cfg, wofs_domains=doms)
-    assert spec.rule == "track+wofs"
-    lat, lon = grid_latlon(spec)
-    # both boxes inside one grid, regardless of their disjoint time windows
-    for box in (d.domain for d in doms):
-        assert lat.min() <= box[0] and lat.max() >= box[1]
-        assert lon.min() <= box[2] and lon.max() >= box[3]
-
-
-def test_build_grid_accepts_a_bare_box_or_single_domain():
-    cfg = grid_config_from_dict({})
-    track = _track(range(0, 25, 6))
-    box = (40.0, 46.0, -80.0, -74.0)
-    a = build_grid(track, cfg, wofs_domains=box)
-    b = build_grid(track, cfg, wofs_domains=[WofsDomain(domain=box)])
-    c = build_grid(track, cfg, wofs_domains=WofsDomain(domain=box))
-    assert a == b == c
-
-
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
@@ -362,3 +216,107 @@ def _run_all():
 
 if __name__ == "__main__":
     _run_all()
+
+
+# --- the WoFS-domain grid --------------------------------------------------
+
+# Global attributes of a real WoFS file (Helene, deployment 20240927_d1).
+HELENE_ATTRS = {"start_lat": 29.02168, "start_lon": -86.84998,
+                "lon_orient": -82.25424, "scale_lat_1": 30.0,
+                "scale_lat_2": 60.0, "d_km": 3.0, "nx": "300", "ny": "300",
+                "CEN_LAT": 33.19005}
+
+
+def test_aggregation_factor():
+    assert aggregation_factor(3.0, 6.0) == 2
+    assert aggregation_factor(3.0, 3.0) == 1
+    with pytest.raises(ValueError):
+        aggregation_factor(3.0, 7.0)
+
+
+def test_wofs_grid_is_150_by_150_at_6_km():
+    spec = wofs_grid_spec(HELENE_ATTRS, 6.0, name="helene", source="f.nc")
+    assert (spec.nx, spec.ny, spec.res_km) == (150, 150, 6.0)
+    assert spec.name == "helene" and spec.source == "f.nc"
+    assert spec.lon_0 == -82.25424 and (spec.lat_1, spec.lat_2) == (30.0, 60.0)
+
+
+def test_native_grid_starts_exactly_at_the_files_lower_left_point():
+    native = wofs_grid_spec(HELENE_ATTRS, 3.0)
+    lat, lon = grid_latlon(native)
+    assert (native.nx, native.ny) == (300, 300)
+    assert abs(lat[0, 0] - 29.02168) < 1e-4
+    assert abs(lon[0, 0] - -86.84998) < 1e-4
+
+
+def test_each_6_km_cell_is_the_mean_of_its_four_3_km_cells():
+    native = wofs_grid_spec(HELENE_ATTRS, 3.0)
+    coarse = wofs_grid_spec(HELENE_ATTRS, 6.0)
+    nlat, nlon = grid_latlon(native)
+    clat, clon = grid_latlon(coarse)
+    blat = nlat.reshape(150, 2, 150, 2).mean(axis=(1, 3))
+    blon = nlon.reshape(150, 2, 150, 2).mean(axis=(1, 3))
+    # projected positions average exactly; lat/lon of the mean differ by
+    # curvature only, far below a metre at this scale
+    assert abs(clat - blat).max() < 1e-5
+    assert abs(clon - blon).max() < 1e-5
+
+
+def test_domain_is_900_km_square():
+    spec = wofs_grid_spec(HELENE_ATTRS, 6.0)
+    assert spec.nx * spec.res_km == 900.0 and spec.ny * spec.res_km == 900.0
+
+
+def test_met_spec_is_east_positive_and_has_the_wofs_projection():
+    spec = wofs_grid_spec(HELENE_ATTRS, 6.0)
+    fields = spec.met_spec.split()
+    assert fields[0] == "lambert"
+    assert (int(fields[1]), int(fields[2])) == (150, 150)
+    assert float(fields[4]) == spec.lon_ll and float(fields[4]) < 0
+    assert float(fields[5]) == -82.25424
+    assert float(fields[6]) == 6.0 and float(fields[7]) == R_EARTH_KM
+    assert (float(fields[8]), float(fields[9])) == (30.0, 60.0)
+    assert fields[10] == "N"
+
+
+def test_ground_spacing_is_close_to_nominal_over_the_domain():
+    spec = wofs_grid_spec(HELENE_ATTRS, 6.0)
+    assert spacing_report(spec)["worst_pct"] < 3.0
+
+
+def test_grid_rejects_a_native_grid_that_does_not_divide():
+    attrs = dict(HELENE_ATTRS, nx="301")
+    with pytest.raises(ValueError):
+        wofs_grid_spec(attrs, 6.0)
+
+
+def test_grid_needs_the_projection_attributes():
+    attrs = {k: v for k, v in HELENE_ATTRS.items() if k != "scale_lat_1"}
+    with pytest.raises(KeyError):
+        wofs_grid_spec(attrs, 6.0)
+
+
+def test_offset_from_file_is_zero_for_a_consistent_file_and_flags_a_shift():
+    native = wofs_grid_spec(HELENE_ATTRS, 3.0)
+    coarse = wofs_grid_spec(HELENE_ATTRS, 6.0)
+    xlat, xlon = grid_latlon(native)
+    assert offset_from_file_km(native, xlat, xlon, 1)[0] < 1e-6
+    assert offset_from_file_km(coarse, xlat, xlon, 2)[0] < 1e-3
+    # a file whose grid sits 0.05 degrees (~5 km) east is not this grid
+    assert offset_from_file_km(coarse, xlat, xlon + 0.05, 2)[0] > 3.0
+
+
+def test_offset_from_file_rejects_wrong_array_shape():
+    coarse = wofs_grid_spec(HELENE_ATTRS, 6.0)
+    import numpy as np
+    with pytest.raises(ValueError):
+        offset_from_file_km(coarse, np.zeros((300, 299)), np.zeros((300, 299)), 2)
+
+
+def test_grid_to_dict_carries_the_spec_and_report():
+    spec = wofs_grid_spec(HELENE_ATTRS, 6.0, source="f.nc")
+    payload = grid_to_dict(spec, spacing_report(spec), extra={"case": "x"})
+    for key in ("nx", "ny", "met_spec", "proj4", "source", "spacing_km",
+                "case", "met_lon_west_positive"):
+        assert key in payload, key
+    assert payload["source"] == "f.nc"

@@ -521,7 +521,7 @@ def load_grid_spec(case):
         lat_1=float(payload["lat_1"]), lat_2=float(payload["lat_2"]),
         lat_ll=float(payload["lat_ll"]), lon_ll=float(payload["lon_ll"]),
         x_ll_km=float(payload["x_ll_km"]), y_ll_km=float(payload["y_ll_km"]),
-        rule=payload.get("rule", ""))
+        source=payload.get("source", ""))
     return spec, spec_path
 
 

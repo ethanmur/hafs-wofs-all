@@ -19,10 +19,12 @@ Loads an ObsCase from the YAML case file and runs one command:
   stats-regrid  distributions and cell-by-cell 1:1 comparisons of the
                 regridded products, per hour and over the whole window,
                 land-only and including ocean, plus stats CSVs
-  build-grid    build this case's common verification grid from the best track
-                inside the valid window, write <out_dir>/<case>_grid.json
-                with the MET grid spec, and draw the sanity map (grid outline,
-                track by ATCF status, statistics swath, WoFS box)
+  build-grid    build this deployment's verification grid: the WoFS domain
+                read from the WoFS files and coarsened to grid.res_km (6 km),
+                written to <out_dir>/<case>_grid.json with the MET grid spec,
+                plus a sanity map (grid outline, best track by ATCF status).
+                Takes a per-deployment case YAML; the commands below still
+                read the older case format until their plan steps are done
   build-masks   every Phase C region on this case's grid: observation
                 validity (US land plus a fixed buffer beyond it),
                 the track swath, the WoFS boxes, and their intersection.
@@ -76,10 +78,6 @@ def _run_obs(obs_cases, obs_case, command):
         from obs_regrid_stats import stats_regrid
         stats_regrid(obs_case)
         return
-    if command == "build-grid":
-        from verification_grid import build_grid_case
-        build_grid_case(obs_case)
-        return
     if command == "plot-hafs":
         from hafs_obs_plots import plot_hafs_obs_case
         plot_hafs_obs_case(obs_case)
@@ -107,6 +105,13 @@ def _run_obs(obs_cases, obs_case, command):
 def main(argv):
     yaml_path, command = parse_args(argv)
     import run_log
+    if command == "build-grid":
+        import deployment_case
+        from verification_grid import build_grid_case
+        case = deployment_case.from_yaml(yaml_path)
+        with run_log.tee(case, command):
+            build_grid_case(case)
+        return
     import obs_cases
     obs_case = obs_cases.from_yaml(yaml_path)
     with run_log.tee(obs_case, command):

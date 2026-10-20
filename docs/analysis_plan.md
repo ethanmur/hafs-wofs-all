@@ -235,14 +235,25 @@ files give for the non-empty inits.
 
 ### A2. Grid builder (`verification_grid.py`)
 
-    python analysis/run.py <deployment>.yaml build-grid
+    python analysis/run.py storms/<case>.yaml build-grid
 
-Read the native grid (projection, corners, 3 km spacing) from a WoFS file,
-aggregate 2 x 2 to `res_km` (6 km), write `grids/<deployment>_grid.json` with
-the MET grid spec. Print the cell counts and which file defined the grid.
+Nothing about the grid is chosen: it is read from the WoFS files and coarsened.
+`wofs_inventory.scan_deployment` finds the deployment's first file and checks
+that every init folder carries the same grid. The file's global attributes
+describe its native grid the way MET does: lower-left point (`start_lat`,
+`start_lon`), Lambert standard longitude `lon_orient`, standard parallels
+`scale_lat_1/2` (30 and 60), spacing `d_km` (3) and `nx`/`ny` (300). The
+verification grid is that grid coarsened by whole 2 x 2 blocks, so each 6 km
+cell is exactly four WoFS cells (150 x 150 cells, 900 km square). Its
+lower-left point is the centre of the first block, 1.5 km up and to the right
+of the native one, computed in the projection plane. `grid.res_km` must be a
+whole multiple of the native spacing and the native grid must divide evenly,
+or the build stops.
 
-The plan's earlier precedence rules and the rule-derived Lambert parameters
-are gone; there is nothing to choose. `domain_override` is gone with them.
+The spec is written to `<out_dir>/<case>_grid.json`: the MET grid-spec string,
+a PROJ.4 string, the native parameters and the spacing and offset checks. Each
+deployment gets its own file; the case YAML is loaded by `deployment_case.py`.
+A deployment with `wofs.available: false` builds no grid and says so.
 
 *Lesson kept:* MET's grid-specification strings take longitudes
 **east**-positive (negative for west) and negate them into its internal
@@ -257,26 +268,47 @@ means the spec is wrong.
 (`RegridInfo::validate() -> Resetting the regridding width from 5 to 2`).
 Tuning `width` upward for BUDGET does nothing.
 
-*Check:* cell counts (150 x 150 expected for 900 km at 6 km); corners match the
-WoFS file; a regrid of a test field produces no all-missing output.
+*Check:* the build compares the grid it made against the file's own `xlat` /
+`xlon` arrays: native cell centres, and the means of each 2 x 2 block against
+the 6 km cell centres. They agree to better than a metre when the projection
+is read correctly. The build stops if the 6 km centres are more than a tenth
+of a cell (0.6 km) from the file, since a misread standard parallel or
+longitude shows up as an offset growing away from the lower-left corner.
 
-*MET:* none for construction; the output is the grid spec consumed downstream
-(`regrid_data_plane -to_grid`, `grid_stat` `regrid.to_grid`).
+*MET:* none for construction; the output *is* the grid spec consumed
+downstream (`regrid_data_plane -to_grid`, and `grid_stat`'s `regrid.to_grid`).
+
+*Status of the other commands:* `build-grid` reads the new per-deployment case
+YAML. `regrid-obs`, `plot-regrid`, `stats-regrid`, `build-masks`,
+`plot-masked`, `list-windows`, `regrid-hafs` and `plot-hafs` still read the
+older case format, and move to `deployment_case.py` in their own phases (B, C,
+D). The classes the old loader needs stay in a marked legacy block of
+`verification_grid.py` until then.
 
 ### A3. Grid sanity plot
-One cartopy figure: domain outline, best-track fixes inside the valid window
-colored by status, US geography, obs coverage extent. The track is context
-here, not geometry.
+One cartopy figure per deployment, drawn by `build-grid`: the domain outline,
+the NHC best track faintly for context, and the fixes inside the scored window
+in colour by ATCF status. The track is context only and plays no part in the
+grid. The title carries the cell count, the ground spacing and the offset from
+the WoFS file.
 
-*Check:* by eye — domain where expected, storm positions plausible relative to
-it.
+*Check:* by eye: the domain where the WoFS plots put it, storm positions
+plausible relative to it, and for far-from-storm deployments (Beryl's Iowa and
+Pennsylvania domains) the storm visibly off the domain.
 
-### A4. Grid-spacing verification
-True ground spacing between adjacent grid points via `pyproj.Geod`: min/max
-mean dx, dy and worst deviation from `res_km`. Native WoFS projection means
-this should be small and stable; the check catches a misread projection.
+### A4. Grid-spacing check
+True ground spacing between adjacent grid points via `pyproj.Geod`: min, max
+and mean dx and dy, and the worst deviation from `res_km`, printed by
+`build-grid` and stored in the JSON.
 
-*Check:* deviation of a few percent at most, the same for every deployment.
+This is a recorded property of the WoFS map projection, not a pass/fail guard:
+a Lambert grid is exact only on its standard parallels, so at 30/60 the ground
+spacing of a domain near 29-37 N runs about 0.5-2.5% above nominal (Helene
+`20240927_d1`: 5.97-6.15 km). It is the same for every model and the truth
+product once they share the grid, and is worth quoting in the write-up beside
+the resolution statement.
+
+---
 
 ---
 
