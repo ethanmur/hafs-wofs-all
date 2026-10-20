@@ -185,11 +185,42 @@ range, and one root per configuration (`HFSA`, `HFSB`, each
 `.../data/hafs/<id>/<config>/<YYYYMMDDHH>`). A deployment with no complete
 window (Idalia) is still written, with `available: false` and no window.
 
-HAFS members for a window are the cycles of one configuration initialized in
-`(window_start - lookback_h, window_start]`: six-hourly over 48 h is 8 per
-configuration, 16 with HFSA and HFSB kept as separate models, close to WoFS's
-18 members. The case YAML only bounds the cycle range; D2 picks the members
-per window.
+HAFS members for a window are the cycles of one configuration initialized
+no more than `lookback_h` (48) before the window start and strictly before it:
+the cycle exactly 48 h back counts, the cycle initialized at the window start
+does not (its first bucket is spin-up, not a forecast of that window).
+Six-hourly cycles then give 8 members per configuration, 16 with HFSA and HFSB
+kept as separate models, close to WoFS's 18 members. The case YAML only bounds
+the cycle range; D2 picks the members per window.
+
+### A1b. HAFS cycle inventory (`hafs_inventory.py`)
+
+    python analysis/hafs_inventory.py <hafs_root> \
+        --wofs-windows wofs_windows.csv --members-csv hafs_members.csv [--deep]
+
+HAFS stops cycling a storm once it is over land or post-tropical, so the
+members the 48 h rule asks for are often not on disk, especially for deployments
+that run after landfall. This step makes that visible before anything is
+regridded. It walks `<root>/<year>-<id>/<HFSA|HFSB>/<YYYYMMDDHH>/`, reports the
+cycles and forecast hours per storm and configuration, and, for every complete
+WoFS window, counts the HAFS members per configuration under the rule above.
+
+A 3 h window is served by one file: the bucket is named for its end, so the
+15-18Z accumulation from an 18Z-prior init is in the f024 file. A (cycle,
+window) pair is `complete` when that file exists, `short_run` when the run ends
+before it, `missing_file` when the run reaches it but the file is absent, and
+`no_files` for an empty cycle folder. `--deep` lists the `tp` intervals in a few
+files per configuration, to close D1's open question that the bucket is 3 h at
+every lead.
+
+Windows where neither configuration has a member are not dropped. They stay in
+the manifest with `hafs_available: false` as **WoFS-only** windows: WoFS vs obs
+can still be scored, but they are excluded from head-to-head WoFS/HAFS
+comparison and pooling.
+
+*Check:* the cycles on disk match the archive by eye; the per-deployment
+summary shows, for each deployment, how many windows have both
+configurations, one, or none.
 
 *Check:* the table matches the archive by eye; a deployment with nothing
 complete is flagged; the empty-folder date inference reproduces the dates the
@@ -407,7 +438,10 @@ cycle schedule and need no data. **WoFS runs come from the A1 availability
 table**, not from a nominal 30 min schedule with a fixed 6 h length: only
 `complete` (init, window) pairs are paired, and the others are carried forward
 with their status for D6. The old `wofs_runs` constants (`WOFS_MAX_LEAD_MIN`,
-cycle spacing) are replaced by what is on disk.
+cycle spacing) are replaced by what is on disk. **HAFS members per window come
+from the A1b rule** (cycles within `lookback_h` before the window start, strictly
+before it), checked against the cycles actually on disk; a window with no member
+is carried forward as WoFS-only.
 
 Three decisions worth recording:
 
@@ -512,8 +546,10 @@ window_start, window_end, lead_h, status)` plus the C2 proximity columns,
 before any statistics run. WoFS rows carry the A1 status (`complete`,
 `missing_steps`, `short_run`, `no_files`) and HAFS rows carry the D4 source
 status, so every window a deployment was expected to supply is accounted for:
-served, or missing with a reason. Deployments with no served windows (Idalia as
-downloaded) appear here explicitly. Where deployments overlap in time, the same
+served, or missing with a reason. HAFS rows carry the member count per
+configuration, and a window with no HAFS member is marked `hafs_available:
+false` (WoFS-only) instead of being dropped. Deployments with no served windows
+(Idalia as downloaded) appear here explicitly. Where deployments overlap in time, the same
 valid window appears once per deployment.
 
 *Check:* read it — this is where silent data gaps surface cheaply rather than
