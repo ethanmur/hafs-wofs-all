@@ -51,6 +51,17 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   same windows. Individual runs first (one WoFS member against one HAFS cycle at
   the same valid window); probability-matched means and ensembles come after
   the individual-run pipeline is stable.
+- **Simultaneous deployments are a feature.** A storm can have two WoFS
+  domains running at once (separate `dN` runs, different grids), and each is
+  verified on its own grid. The same valid window therefore appears once per
+  deployment, and a HAFS cycle is regridded once per grid.
+- **Data gaps are the norm, and are recorded, not assumed away.** The archive
+  has runs of different lengths (3 h and 6 h), runs with holes, empty init
+  folders, and one storm (Idalia) with a single file per init. Availability is
+  always decided from the steps actually on disk, per (init, window), and every
+  unavailable pair stays in the manifest with a reason (`short_run`,
+  `missing_steps`, `no_files`) so it is visible instead of silently absent. A
+  deployment with nothing to verify is reported, not dropped.
 - **HAFS-A and HAFS-B are separate models**, never pooled, because their
   physics differ. A later HAFS "ensemble" is built from several cycles of one
   configuration. Mixing configurations is an experiment, not a default.
@@ -66,9 +77,12 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
 
 ### Open items
 
-- Where the grid definition is read from (a WoFS file's lat/lon and projection
-  metadata, assumed) and whether every 2023–2024 deployment is the same
-  900 x 900 km, 3 km setup. Resolved in A1.
+- Idalia (2023) has one file per init and 11 empty init folders, so it has no
+  complete 3 h WoFS window as downloaded. It stays in the inventory and
+  manifest as unavailable; whether more files can be obtained is outside the
+  code.
+- Stage IV coverage over the mountain West (Hilary's three California and
+  Nevada domains) is verified by hand; `truth_source: mrms` is the fallback.
 - Whether AORC and the obs-vs-obs comparison plots stay. AORC is no longer a
   truth candidate; B3 and H1 decide whether the comparison tooling survives as
   QC or is deleted.
@@ -113,17 +127,57 @@ stay, and move those helpers rather than leaving a dependency on dead code.
 *Check:* `pytest` passes; `run.py` with no command lists only the commands that remain;
 no surviving module imports a deleted one.
 
-### A1. WoFS deployment inventory
-For each storm, list the WoFS deployments: domain, valid period, member count,
-cycle times. This table is the source for each deployment's grid and for
-`valid_start` / `valid_end`.
+### A1. WoFS deployment inventory (`wofs_inventory.py`)
+
+    python analysis/wofs_inventory.py <wofs_root> --csv inventory.csv \
+        --windows-csv windows.csv [--deep]
+
+Walks `<root>/<year>_<STORM>/<YYYYMMDD>_d<N>/<HHMM>/wofs_ALL_<step>_...nc` and
+reports one row per deployment folder: first and last init, last valid time,
+init and step counts, the grid its files carry, and notes for anything odd.
+Init and valid times come from the files' attributes; folder and file names are
+only cross-checked, because a folder named for one date holds inits on the
+next (a `0300` init in a folder dated the day before).
+
+Facts established from the 2023–2024 archive:
+
+- 12 deployment folders in 5 storms (Hilary, Idalia, Beryl, Helene, Milton),
+  **12 distinct grids**: each deployment has its own center and corner. Shared
+  across all: 300 x 300 cells at 3 km, Lambert conformal, standard parallels
+  30/60, sphere radius 6371.2 km.
+- One file is one 5 min step holding all 18 members. `rain` is the
+  accumulation over the preceding 5 min, in inches; step 00 is exactly zero.
+- `xlat`/`xlon` agree with the grid attributes to ~0.004 degrees, longitudes
+  are east-negative. The grid is built from the attributes (A2); the arrays
+  are only a check.
+- Runs differ in length (37 or 73 steps, i.e. 3 h or 6 h, and shorter in
+  Hilary), some have holes, some init folders are empty, and Idalia has a
+  single file per init.
+
+**Window availability table** (`--windows-csv`): one row per (init, 3 h clock
+window) from the init to 6 h later, with a status judged from the exact steps
+the window needs. The window (start, end] is the sum of steps `s+1 .. s+36`,
+where `s` is the step at the window start, so step 00 is never needed:
+
+| status | meaning |
+|---|---|
+| `complete` | all 36 steps are on disk |
+| `missing_steps` | the run reaches the window but a step below its last file is absent |
+| `short_run` | the run ends before the window does |
+| `no_files` | the init folder is empty (init time inferred from the folder names, flagged `init_inferred`) |
+
+This table, not a fixed "6 h run" constant, is the source for D2. The script
+also prints a per-deployment summary (windows, windows with at least one
+complete run, a flag for deployments with nothing to verify) and the pairs of
+deployments that overlap in time.
 
 Per-deployment case YAML (replaces the per-storm file): storm, deployment id,
 WoFS root, HAFS roots by configuration, `init_start` / `init_end`,
 `truth_source`.
 
-*Check:* a table of storm, deployment, first/last valid time, domain corners,
-member count; confirm all 2023–2024 deployments share one grid shape.
+*Check:* the table matches the archive by eye; a deployment with nothing
+complete is flagged; the empty-folder date inference reproduces the dates the
+files give for the non-empty inits.
 
 ### A2. Grid builder (`verification_grid.py`)
 
@@ -332,8 +386,12 @@ with its own id, so member -> ensemble is later a group-by, not a refactor.
 ### D2. Absolute-clock window definition (`accum_windows.py`)
 Produces the list of 3 h windows spanning `valid_start` -> `valid_end` on the
 00/03/06...Z clock and, for each model run, the lead offsets covering each
-window. Drops windows a run cannot fully span. Reads no data, so it runs before
-anything is staged.
+window. Drops windows a run cannot fully span. HAFS runs come from the nominal
+cycle schedule and need no data. **WoFS runs come from the A1 availability
+table**, not from a nominal 30 min schedule with a fixed 6 h length: only
+`complete` (init, window) pairs are paired, and the others are carried forward
+with their status for D6. The old `wofs_runs` constants (`WOFS_MAX_LEAD_MIN`,
+cycle spacing) are replaced by what is on disk.
 
 Three decisions worth recording:
 
@@ -368,10 +426,13 @@ WoFS's internal lead-time dependence for free.
 f00:30–f03:30; a 1430Z run yields none; HAFS bucket-granularity cases.
 
 ### D3. WoFS 3 h windows on the deployment grid
-For each (member, init, window): accumulate the 5-min output into the 3 h
-window and put it on the 6 km grid. If WoFS writes since-init totals, the
-window is a difference; if per-interval, a sum (`pcp_combine`, convention per
-D1). The 3 -> 6 km step is a budget regrid to the A2 grid, not a block mean
+For each (member, init, window) the A1 table marks `complete`: accumulate the
+36 five-minute steps into the 3 h window and put it on the 6 km grid. `rain` is
+a per-interval accumulation in inches, so the window is a sum of steps
+`s+1 .. s+36`, converted to mm (x 25.4); no differencing is needed. A pair that
+is not `complete` is never partially summed: a 35-step total is not a 3 h total
+and would bias every threshold, the same reason a missing obs hour makes an obs
+window missing. Each deployment's windows are put on that deployment's own grid. The 3 -> 6 km step is a budget regrid to the A2 grid, not a block mean
 written by hand, so WoFS goes through the same operator as everything else.
 
 *Check:* conservation CSV, same form as obs; domain-mean preserved to a few
@@ -430,9 +491,14 @@ regridding or window pairing is wrong; one that disagrees in amount is the
 forecast being wrong, which is the thing being measured.
 
 ### D6. Window manifest
-A CSV inventory of every `(model, run id, member, init, window_start,
-window_end, lead_h, status)` plus the C2 proximity columns, before any
-statistics run.
+A CSV inventory of every `(model, deployment, run id, member, init,
+window_start, window_end, lead_h, status)` plus the C2 proximity columns,
+before any statistics run. WoFS rows carry the A1 status (`complete`,
+`missing_steps`, `short_run`, `no_files`) and HAFS rows carry the D4 source
+status, so every window a deployment was expected to supply is accounted for:
+served, or missing with a reason. Deployments with no served windows (Idalia as
+downloaded) appear here explicitly. Where deployments overlap in time, the same
+valid window appears once per deployment.
 
 *Check:* read it — this is where silent data gaps surface cheaply rather than
 as strange scores later.
