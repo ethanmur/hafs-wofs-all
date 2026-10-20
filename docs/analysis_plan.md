@@ -117,9 +117,9 @@ stay, and move those helpers rather than leaving a dependency on dead code.
 - `hafs_common.py`, keeping only what a surviving module imports.
 - The matching tests, and the `run.py` subcommands `parent`, `ets`, `rmse`,
   `cycles`, `cycles-compare`, `all`, `compare`, `replot`.
-- The HAFS-only configs in `storms/helene_only/`. The per-case grid YAMLs
-  `storms/build_grid_*.yaml` stay until A2 replaces them: they are still the
-  config for the surviving `build-grid` / `regrid-obs` commands.
+- The HAFS-only configs in `storms/helene_only/`, and the old per-storm
+  YAMLs (`build_grid_*`, `obs_regrid_plot_*`), replaced by the per-deployment
+  files written in A1.
 - Helpers that surviving modules used move out first: the US-geography overlay
   and QPF colormap to `plot_common.py`, the MRMS download functions to
   `obs_cases.py`.
@@ -171,9 +171,25 @@ also prints a per-deployment summary (windows, windows with at least one
 complete run, a flag for deployments with nothing to verify) and the pairs of
 deployments that overlap in time.
 
-Per-deployment case YAML (replaces the per-storm file): storm, deployment id,
-WoFS root, HAFS roots by configuration, `init_start` / `init_end`,
-`truth_source`.
+**Per-deployment case YAMLs** (replace the per-storm files):
+
+    python analysis/make_case_yamls.py wofs_inventory.csv wofs_windows.csv
+
+One file per deployment in `storms/`, named
+`<year>_<id>_<storm>_<deployment>.yaml`. The scoring window is not typed in: it
+runs from the first complete 3 h window to the last, read from the window table
+above. Each file holds the storm and HAFS id, the best-track path, `truth_source`,
+the WoFS root with `available` and `complete_windows`, `valid_start` /
+`valid_end`, and the HAFS block: `lookback_h: 48`, the `init_start` / `init_end`
+range, and one root per configuration (`HFSA`, `HFSB`, each
+`.../data/hafs/<id>/<config>/<YYYYMMDDHH>`). A deployment with no complete
+window (Idalia) is still written, with `available: false` and no window.
+
+HAFS members for a window are the cycles of one configuration initialized in
+`(window_start - lookback_h, window_start]`: six-hourly over 48 h is 8 per
+configuration, 16 with HFSA and HFSB kept as separate models, close to WoFS's
+18 members. The case YAML only bounds the cycle range; D2 picks the members
+per window.
 
 *Check:* the table matches the archive by eye; a deployment with nothing
 complete is flagged; the empty-folder date inference reproduces the dates the
