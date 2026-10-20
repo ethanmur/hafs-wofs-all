@@ -9,9 +9,11 @@ availability table written by wofs_inventory.py. A deployment with no complete
 window (Idalia as downloaded) still gets a file, marked ``available: false``,
 so it appears in every later table instead of silently vanishing.
 
-HAFS members are the cycles of one configuration initialized in the
-``lookback_h`` hours before a window starts: 6-hourly cycles over 48 h are 8
-per configuration, 16 with HFSA and HFSB kept as separate models.
+HAFS members are the cycles of one configuration initialized at most
+``lookback_h`` hours before a window starts (and strictly before it): 6-hourly
+cycles over 48 h are 8 per configuration, 16 with HFSA and HFSB kept as
+separate models. A window needs ``min_members`` of them, the two configurations
+counted together, to be HAFS-eligible.
 """
 
 import argparse
@@ -24,6 +26,7 @@ ORION = "/work2/noaa/aoml-hafs1/emurray/ppgc-hafs"
 TIME_FMT = "%Y-%m-%d %H%MZ"
 HAFS_CYCLE_H = 6
 HAFS_LOOKBACK_H = 48
+HAFS_MIN_MEMBERS = 8
 HAFS_MODELS = ("HFSA", "HFSB")
 
 # WoFS archive folder -> (HAFS storm id, display name, b-deck file)
@@ -125,10 +128,13 @@ def render_case(case, orion=ORION):
             f"valid_start: {_hour(start)}",
             f"valid_end:   {_hour(end)}",
             "",
-            "# HAFS members for a window are the cycles of one configuration",
-            "# initialized in (window_start - lookback_h, window_start].",
+            "# HAFS members for a window: cycles of one configuration initialized",
+            "# at most lookback_h before the window start and strictly before it.",
+            "# A window is HAFS-eligible with at least min_members members, HFSA",
+            "# and HFSB together; below that it is scored as WoFS-only.",
             "hafs:",
             f"  lookback_h: {case['lookback_h']}",
+            f"  min_members: {HAFS_MIN_MEMBERS}",
             f"  init_start: {_hour(case['init_start'])}",
             f"  init_end:   {_hour(case['init_end'])}",
             "  models:",

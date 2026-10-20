@@ -23,9 +23,15 @@ initialized at the window start is spin-up, not a forecast of that window; the
 cycle exactly 48 h back is included. Six-hourly cycles then give 8 members per
 configuration, 16 with HFSA and HFSB.
 
+A window is HAFS-eligible (``hafs_status: ok``) when its members, HFSA and HFSB
+counted together, reach ``min_members`` (8), so there is enough spread to treat
+them as an ensemble; between 1 and 7 is ``thin`` and none is ``none``. The
+threshold only decides eligibility: HFSA and HFSB statistics stay separate, so
+a window can pass with members from one configuration only.
+
 Usage:
     python analysis/hafs_inventory.py <hafs_root> [--wofs-windows windows.csv]
-        [--members-csv members.csv] [--deep]
+        [--members-csv members.csv] [--min-members 8] [--deep]
 
 --deep lists the ``tp`` accumulation intervals in a few files per configuration
 (needs eccodes), to confirm that the 3 h bucket exists at every lead.
@@ -50,6 +56,7 @@ CONFIGS = ("HFSA", "HFSB")
 CYCLE_H = 6
 BUCKET_H = 3
 LOOKBACK_H = 48
+MIN_MEMBERS = 8
 DEEP_LEADS = (3, 6, 12, 24, 48, 126)
 
 
@@ -197,7 +204,15 @@ def print_cycles(rows):
             print(f"      ! {r['notes']}")
 
 
-def member_rows(archive, wofs_rows, lookback_h=LOOKBACK_H):
+def hafs_status(total, min_members=MIN_MEMBERS):
+    """ok / thin / none for a window's total member count."""
+    if total >= min_members:
+        return "ok"
+    return "thin" if total > 0 else "none"
+
+
+def member_rows(archive, wofs_rows, lookback_h=LOOKBACK_H,
+                min_members=MIN_MEMBERS):
     """One row per (deployment, complete WoFS window, config): the HAFS
     members available for it."""
     from accum_windows import Window
@@ -213,49 +228,52 @@ def member_rows(archive, wofs_rows, lookback_h=LOOKBACK_H):
         seen.add(key)
         win = Window(parse_time(r["window_start"]), parse_time(r["window_end"]))
         sid = folder_to_sid[r["storm"]]
+        win_rows = []
         for config in CONFIGS:
             cycles = archive.get((sid, config), ({}, []))[0]
             n, usable = window_members(win, cycles, lookback_h)
-            rows.append({
+            win_rows.append({
                 "storm": r["storm"], "deployment": r["deployment"],
                 "window_start": r["window_start"],
                 "window_end": r["window_end"], "config": config,
                 "n_members": n,
                 "members": ";".join(f"{i:%Y%m%d%H}" for i in usable),
             })
+        total = sum(w["n_members"] for w in win_rows)
+        for w in win_rows:
+            w["total_members"] = total
+            w["hafs_status"] = hafs_status(total, min_members)
+        rows.extend(win_rows)
     return rows
 
 
 def summarize_members(rows):
-    """{deployment: counts} -- how many WoFS windows have HAFS members."""
-    by_win = defaultdict(dict)
+    """{deployment: counts} -- how many WoFS windows are HAFS-eligible."""
+    by_win = {}
     for r in rows:
-        by_win[(r["storm"], r["deployment"], r["window_start"])][
-            r["config"]] = r["n_members"]
+        by_win[(r["storm"], r["deployment"], r["window_start"])] = (
+            r["hafs_status"], r["total_members"])
     out = defaultdict(lambda: defaultdict(int))
-    for (storm, dep, _), cfg in by_win.items():
+    for (storm, dep, _), (status, total) in by_win.items():
         d = out[(storm, dep)]
         d["windows"] += 1
-        a, b = cfg.get("HFSA", 0), cfg.get("HFSB", 0)
-        d["both"] += bool(a and b)
-        d["hfsa_only"] += bool(a and not b)
-        d["hfsb_only"] += bool(b and not a)
-        d["none"] += not (a or b)
-        d["members_sum"] += a + b
+        d[status] += 1
+        d["members_sum"] += total
     return out
 
 
-def print_members(summary):
-    print("\nHAFS members per complete WoFS window "
-          "(lookback rule: 48 h, strictly before the window):")
-    cols = ["windows", "both", "hfsa_only", "hfsb_only", "none"]
+def print_members(summary, min_members=MIN_MEMBERS):
+    print(f"\nHAFS members per complete WoFS window (48 h lookback, strictly "
+          f"before the window; ok = at least {min_members} members, HFSA+HFSB "
+          f"together):")
+    cols = ["windows", "ok", "thin", "none"]
     print("  " + "deployment".ljust(34)
-          + "".join(c.rjust(11) for c in cols) + "   mean members")
+          + "".join(c.rjust(9) for c in cols) + "   mean members")
     for (storm, dep), d in summary.items():
         mean = d["members_sum"] / d["windows"] if d["windows"] else 0
-        flag = "   <-- WoFS-only" if d["windows"] and d["none"] == d["windows"] else ""
+        flag = ("   <-- WoFS-only" if d["windows"] and not d["ok"] else "")
         print("  " + f"{storm}/{dep}".ljust(34)
-              + "".join(str(d[c]).rjust(11) for c in cols)
+              + "".join(str(d[c]).rjust(9) for c in cols)
               + f"   {mean:5.1f}{flag}")
 
 
@@ -267,6 +285,7 @@ def main(argv):
     ap.add_argument("--members-csv",
                     help="write the per-window member table here")
     ap.add_argument("--lookback-h", type=int, default=LOOKBACK_H)
+    ap.add_argument("--min-members", type=int, default=MIN_MEMBERS)
     ap.add_argument("--deep", action="store_true")
     args = ap.parse_args(argv)
 
@@ -276,8 +295,9 @@ def main(argv):
     if args.wofs_windows:
         with open(args.wofs_windows, newline="") as fh:
             wofs_rows = list(csv.DictReader(fh))
-        rows = member_rows(archive, wofs_rows, args.lookback_h)
-        print_members(summarize_members(rows))
+        rows = member_rows(archive, wofs_rows, args.lookback_h,
+                           args.min_members)
+        print_members(summarize_members(rows), args.min_members)
         if args.members_csv and rows:
             with open(args.members_csv, "w", newline="") as fh:
                 w = csv.DictWriter(fh, fieldnames=list(rows[0]))

@@ -51,6 +51,7 @@ def test_rendered_available_case_parses_with_expected_keys():
     assert cfg["valid_start"] == 2024070818 and cfg["valid_end"] == 2024070821
     assert cfg["wofs"]["available"] is True
     assert cfg["hafs"]["lookback_h"] == 48
+    assert cfg["hafs"]["min_members"] == 8
     assert set(cfg["hafs"]["models"]) == {"HFSA", "HFSB"}
     assert cfg["hafs"]["models"]["HFSB"].endswith("/hafs/2024-02l/HFSB")
     assert cfg["wofs"]["root"].endswith("/2024_BERYL/20240708_d1")

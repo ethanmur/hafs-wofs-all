@@ -210,13 +210,20 @@ A 3 h window is served by one file: the bucket is named for its end, so the
 window) pair is `complete` when that file exists, `short_run` when the run ends
 before it, `missing_file` when the run reaches it but the file is absent, and
 `no_files` for an empty cycle folder. `--deep` lists the `tp` intervals in a few
-files per configuration, to close D1's open question that the bucket is 3 h at
-every lead.
+files per configuration; run on the 2023-2024 archive it showed a 3 h bucket
+plus the run total at every sampled lead (f003, f006, f012, f024, f048, f126),
+closing D1's open question. At f003 the bucket and the run total are the same
+interval (`0-3`), so `level="A3"` matches two identical records there; D4 checks
+that MET reads that file without complaint.
 
-Windows where neither configuration has a member are not dropped. They stay in
-the manifest with `hafs_available: false` as **WoFS-only** windows: WoFS vs obs
-can still be scored, but they are excluded from head-to-head WoFS/HAFS
-comparison and pooling.
+A window is **HAFS-eligible** (`hafs_status: ok`) with at least
+`min_members` (8) members, HFSA and HFSB counted together, so there is enough
+spread to treat them as an ensemble; 1-7 is `thin` and none is `none`. The
+threshold only decides eligibility: HFSA and HFSB statistics stay separate, so
+a window can pass with members from one configuration only. Windows that are
+not eligible are not dropped. They stay in the manifest as **WoFS-only**
+windows: WoFS vs obs can still be scored, but they are excluded from
+head-to-head WoFS/HAFS comparison and pooling.
 
 *Check:* the cycles on disk match the archive by eye; the per-deployment
 summary shows, for each deployment, how many windows have both

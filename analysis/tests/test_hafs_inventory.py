@@ -82,8 +82,15 @@ def test_scan_config_missing_dir(tmp_path):
     assert cycles == {} and "not found" in notes[0]
 
 
-def test_member_rows_and_summary_flag_windows_with_no_hafs():
-    wofs = [{"storm": "2024_BERYL", "deployment": "20240710_d1",
+def test_hafs_status_thresholds():
+    assert hi.hafs_status(8) == "ok" and hi.hafs_status(16) == "ok"
+    assert hi.hafs_status(7) == "thin" and hi.hafs_status(1) == "thin"
+    assert hi.hafs_status(0) == "none"
+    assert hi.hafs_status(4, min_members=4) == "ok"
+
+
+def _wofs_rows():
+    return [{"storm": "2024_BERYL", "deployment": "20240710_d1",
              "window_start": "2024-07-10 1800Z",
              "window_end": "2024-07-10 2100Z", "status": "complete"},
             {"storm": "2024_BERYL", "deployment": "20240710_d1",
@@ -92,11 +99,28 @@ def test_member_rows_and_summary_flag_windows_with_no_hafs():
             {"storm": "2024_BERYL", "deployment": "20240710_d1",
              "window_start": "2024-07-10 2100Z",
              "window_end": "2024-07-11 0000Z", "status": "short_run"}]
+
+
+def test_member_rows_carry_total_and_status_for_thin_windows():
     archive = {("2024-02l", "HFSA"): ({datetime(2024, 7, 8, 18): [3, 51]}, []),
                ("2024-02l", "HFSB"): ({}, [])}
-    rows = hi.member_rows(archive, wofs)
+    rows = hi.member_rows(archive, _wofs_rows())
     assert len(rows) == 2                      # one window x two configs
     a = next(r for r in rows if r["config"] == "HFSA")
     assert a["n_members"] == 1 and a["members"] == "2024070818"
+    assert a["total_members"] == 1 and a["hafs_status"] == "thin"
     summary = hi.summarize_members(rows)[("2024_BERYL", "20240710_d1")]
-    assert summary["windows"] == 1 and summary["hfsa_only"] == 1
+    assert summary["windows"] == 1 and summary["thin"] == 1 and not summary["ok"]
+
+
+def test_pooled_total_of_eight_passes_even_with_one_configuration():
+    leads = list(range(0, 127, 3))
+    inits = {datetime(2024, 7, 8, 18) + timedelta(hours=6 * k): leads
+             for k in range(10)}
+    archive = {("2024-02l", "HFSA"): (inits, []), ("2024-02l", "HFSB"): ({}, [])}
+    wofs = [{"storm": "2024_BERYL", "deployment": "d",
+             "window_start": "2024-07-10 2100Z",
+             "window_end": "2024-07-11 0000Z", "status": "complete"}]
+    rows = hi.member_rows(archive, wofs)
+    assert {r["hafs_status"] for r in rows} == {"ok"}
+    assert [r["n_members"] for r in rows] == [8, 0]
