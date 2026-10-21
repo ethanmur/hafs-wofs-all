@@ -73,7 +73,7 @@ class DeploymentCase:
     complete_windows: int
     grid_json_dir: Path        # data/json-grids/        <case>_grid.json
     grid_plot_dir: Path        # figures/regrid-wofs/    <case>_grid.png
-    regrid_dir: Path           # data/stage-iv-regrid/   regridded obs + CSV
+    regrid_dir: Path           # data/stage-iv-regrid/<dep>_<storm>/  regridded obs + CSV
     regrid_plot_dir: Path      # figures/regrid-obs-tests/<dep>_<storm>/
     log_dir: Path              # data/logs/
     mrms_cache_dir: Path
@@ -105,15 +105,22 @@ class DeploymentCase:
         return self.grid_plot_dir / f"{self.case_slug}_grid.png"
 
     @property
-    def regrid_prefix(self):
-        """Starts every regridded file of this deployment and resolution, so
-        deployments (which share hours but not grids) can share one folder."""
-        return f"{self.case_slug}_{self.res_km:g}km"
+    def folder_name(self):
+        """<deployment>_<storm>, e.g. 20240927_d1_helene: names this
+        deployment's folder under both data/ and figures/. The deployment
+        carries its date because d1 alone repeats (Helene has a d1 on two days,
+        overlapping in time)."""
+        return f"{self.deployment}_{self.storm_name.lower()}"
+
+    @property
+    def res_label(self):
+        return f"{self.res_km:g}km"
 
     @property
     def budget_csv_path(self):
         """The conservation check, beside the regridded data it describes."""
-        return self.regrid_dir / f"regrid_budget_{self.output_slug}.csv"
+        return self.regrid_dir / (f"regrid_budget_{self.valid_start:%Y%m%d%H}_"
+                                  f"{self.valid_end:%Y%m%d%H}.csv")
 
     @property
     def regrid_sources(self):

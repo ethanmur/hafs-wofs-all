@@ -36,7 +36,8 @@ class RegridConfig:
     cache_dir: Path
     grid_spec: str          # MET grid-specification string, from the grid JSON
     grid_name: str
-    prefix: str = ""        # starts every file name; lets deployments share a dir
+    res_label: str = ""     # e.g. 6km; kept in file names so a changed
+                            # resolution can never reuse another's files
     method: str = "BUDGET"
     width: int = 2
     vld_thresh: float = 0.5
@@ -47,22 +48,23 @@ class RegridConfig:
     def field_spec(self, source):
         return self.fields.get(source, DEFAULT_FIELDS[source])
 
-    def _named(self, name):
-        return self.cache_dir / (f"{self.prefix}_{name}" if self.prefix
-                                 else name)
-
     def output_path(self, source, valid_dt):
-        # Flat: one directory for every deployment, the deployment, grid
-        # resolution and source all named in the filename.
-        return self._named(f"{source}_{valid_dt:%Y%m%d%H}.nc")
+        # cache_dir is one deployment's own folder, so the file needs only the
+        # valid hour, the product and the resolution. The valid hour leads, so
+        # the folder sorts chronologically.
+        stem = "_".join(p for p in (f"{valid_dt:%Y%m%d%H}", source,
+                                    self.res_label) if p)
+        return self.cache_dir / f"{stem}.nc"
 
     @property
     def settings_path(self):
-        return self._named(SETTINGS_FILE)
+        stem = "_".join(p for p in (Path(SETTINGS_FILE).stem, self.res_label)
+                        if p)
+        return self.cache_dir / f"{stem}{Path(SETTINGS_FILE).suffix}"
 
     @property
     def staging_dir(self):
-        return self.cache_dir / "_staging" / (self.prefix or "case")
+        return self.cache_dir / "_staging"
 
 
 # =============================================================================
@@ -264,7 +266,7 @@ def check_cache_settings(config):
                 f"different settings:\n  on disk:    "
                 f"{' '.join(have.split())}\n  configured: "
                 f"{' '.join(want.split())}\nDelete this deployment's files "
-                f"in {config.cache_dir} (they start with {config.prefix!r}) "
+                f"in {config.cache_dir} (names ending {config.res_label!r}) "
                 "to regrid with the new settings.")
         return
     config.cache_dir.mkdir(parents=True, exist_ok=True)

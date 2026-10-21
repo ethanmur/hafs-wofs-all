@@ -31,7 +31,7 @@ hafs:
 
 grid_json_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/json-grids/
 grid_plot_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-wofs/
-regrid_dir:      /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv-regrid/
+regrid_dir:      /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv-regrid/20240709_d1_beryl/
 regrid_plot_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-obs-tests/20240709_d1_beryl/
 log_dir:         /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/logs/
 mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms/

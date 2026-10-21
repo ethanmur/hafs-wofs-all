@@ -95,21 +95,19 @@ def test_the_truth_product_decides_what_must_be_cached(tmp_path, monkeypatch):
     assert len(check_cache_complete(both)) == 2     # no MRMS cached
 
 
-def test_regrid_config_reads_the_grid_spec_and_names_files_by_deployment(
+def test_regrid_config_reads_the_grid_spec_and_names_files_by_hour_and_product(
         tmp_path):
     case = _case(tmp_path)
     _write_grid_json(case)
     cfg = regrid_config(case)
     assert cfg.grid_spec.startswith("lambert 150 150")
-    assert cfg.cache_dir == tmp_path / "rg"          # shared, flat
+    assert cfg.cache_dir == tmp_path / "rg"     # this deployment's own folder
     assert cfg.method == "BUDGET" and cfg.width == 2
-    # deployments share hours but not grids, so the name carries the case
+    # the folder names the deployment, so the file needs only hour + product
     assert cfg.output_path("stage4", datetime(2024, 9, 26, 1)) == (
-        tmp_path / "rg"
-        / "2024_02l_beryl_20240708_d1_6km_stage4_2024092601.nc")
-    assert cfg.settings_path.name == (
-        "2024_02l_beryl_20240708_d1_6km_regrid_settings.txt")
-    assert cfg.staging_dir == tmp_path / "rg" / "_staging" / cfg.prefix
+        tmp_path / "rg" / "2024092601_stage4_6km.nc")
+    assert cfg.settings_path.name == "regrid_settings_6km.txt"
+    assert cfg.staging_dir == tmp_path / "rg" / "_staging"
 
 
 def test_regrid_config_without_a_grid_says_to_run_build_grid(tmp_path):

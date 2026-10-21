@@ -98,7 +98,7 @@ def regrid_config(case):
                          "<yaml> build-grid") from None
     settings = case.regrid
     return met_regrid.RegridConfig(
-        cache_dir=case.regrid_dir, prefix=case.regrid_prefix,
+        cache_dir=case.regrid_dir, res_label=case.res_label,
         grid_spec=spec, grid_name=name or case.case_slug,
         method=settings.method, width=settings.width,
         vld_thresh=settings.vld_thresh, tolerance_pct=settings.tolerance_pct,

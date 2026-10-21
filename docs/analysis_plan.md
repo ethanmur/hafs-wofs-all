@@ -52,15 +52,17 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   the same valid window); probability-matched means and ensembles come after
   the individual-run pipeline is stable.
 - **Files live in flat `data/` and `figures/` folders, by kind.** Similar files
-  sit next to each other, not in per-case output trees, and file names carry the
-  case so deployments share a folder. There is no `output/` folder. Root is
+  sit next to each other, not in per-case output trees. Grid specs and grid maps
+  are one flat folder each, with the case in the file name; regridded obs and
+  their maps get one `<deployment>_<storm>` folder per deployment. There is no
+  `output/` folder. Root is
   `/work2/noaa/aoml-hafs1/emurray/ppgc-hafs/`:
 
   | what | where |
   |---|---|
   | grid specs (`<case>_grid.json`) | `data/json-grids/` |
   | grid sanity maps (`<case>_grid.png`) | `figures/regrid-wofs/` |
-  | regridded obs (`<case>_6km_<source>_<YYYYMMDDHH>.nc`), their conservation CSV and settings guard | `data/stage-iv-regrid/` |
+  | regridded obs (`<YYYYMMDDHH>_<source>_6km.nc`), their conservation CSV and settings guard | `data/stage-iv-regrid/<deployment>_<storm>/` |
   | regridded-obs maps, `stats-regrid` figures and CSVs | `figures/regrid-obs-tests/<deployment>_<storm>/` |
   | run logs | `data/logs/` |
   | raw downloads | `data/mrms/`, `data/stage-iv/` |
@@ -345,13 +347,16 @@ go with it; anomalies are now against the case's `truth_source`.
 module imports `aorc_common`; tests pass.
 
 ### B1. Cache layout
-Regridded obs live together in `regrid_dir` (`data/stage-iv-regrid/`), one flat
-folder for every deployment. Deployments share obs hours but not grids, so each
-file name starts with the case and resolution:
-`<case>_6km_<source>_<YYYYMMDDHH>.nc`. Beside them sit
-`<case>_6km_regrid_settings.txt`, which records the grid spec, method and width,
-and the conservation CSV. A different grid or setting refuses to reuse a
-deployment's files, so a rebuilt grid cannot quietly mix with old output.
+Regridded obs live in one folder per deployment under `data/stage-iv-regrid/`,
+named `<deployment>_<storm>` (`20240927_d1_helene/`), matching the plot folders.
+The deployment carries its date because `d1` alone repeats: Helene has a `d1` on
+two days that overlap in time. Inside, files are named
+`<YYYYMMDDHH>_<source>_6km.nc` (`2024092707_stage4_6km.nc`), so the folder sorts
+chronologically and a second product sits beside the first
+(`2024092707_mrms_6km.nc`). Beside them are `regrid_settings_6km.txt`, which
+records the grid spec, method and width, and `regrid_budget_<start>_<end>.csv`,
+the conservation check. A different grid or setting refuses to reuse the
+folder's files, so a rebuilt grid cannot quietly mix with old output.
 **Native downloads are never touched:** the MRMS re-download is the expensive
 part and those files are grid-independent.
 

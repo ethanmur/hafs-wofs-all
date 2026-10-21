@@ -99,13 +99,15 @@ def _hour(dt):
 
 
 def path_lines(storm_name, deployment, orion=ORION):
-    """Where a deployment's files go: similar files together, flat, under
-    data/ or figures/ -- never a per-case output folder. File names carry the
-    case, so deployments share these folders."""
+    """Where a deployment's files go: by kind, under data/ or figures/ -- never
+    a per-case output tree. Grid specs and grid maps are one flat folder each
+    (the case is in the file name); regridded obs and their maps get one
+    <deployment>_<storm> folder per deployment."""
     return [
         f"grid_json_dir:   {orion}/data/json-grids/",
         f"grid_plot_dir:   {orion}/figures/regrid-wofs/",
-        f"regrid_dir:      {orion}/data/stage-iv-regrid/",
+        f"regrid_dir:      {orion}/data/stage-iv-regrid/"
+        f"{deployment}_{storm_name.lower()}/",
         f"regrid_plot_dir: {orion}/figures/regrid-obs-tests/"
         f"{deployment}_{storm_name.lower()}/",
         f"log_dir:         {orion}/data/logs/",

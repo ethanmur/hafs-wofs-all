@@ -379,33 +379,38 @@ def test_met_tool_prefers_bin_dir():
 # ----------------------------------------------------------------------------
 
 def test_regrid_config_defaults_and_cache_layout():
-    cfg = _config("/c", cache_dir=Path("/c"),
+    cfg = _config("/c", cache_dir=Path("/c"), res_label="6km",
                   fields={"mrms": 'name="X"; level="Z0";'})
     assert cfg.method == "BUDGET" and cfg.width == 2 and cfg.vld_thresh == 0.5
-    # flat layout: one directory per grid, source named in the file
+    # one folder per deployment: valid hour, product and resolution in the file
     assert cfg.output_path("stage4", datetime(2024, 9, 24, 2)) == Path(
-        "/c/stage4_2024092402.nc")
+        "/c/2024092402_stage4_6km.nc")
     assert cfg.field_spec("mrms") == 'name="X"; level="Z0";'
     assert cfg.field_spec("stage4") == met_regrid.DEFAULT_FIELDS["stage4"]
 
 
-def test_prefix_keeps_deployments_apart_in_one_directory():
-    a = _config("/c", cache_dir=Path("/c"), prefix="beryl_d1_6km")
-    b = _config("/c", cache_dir=Path("/c"), prefix="beryl_d2_6km")
-    t = datetime(2024, 9, 24, 2)
-    assert a.output_path("stage4", t) == Path("/c/beryl_d1_6km_stage4_2024092402.nc")
-    assert a.output_path("stage4", t) != b.output_path("stage4", t)
-    assert a.settings_path != b.settings_path
-    assert a.staging_dir != b.staging_dir
+def test_files_are_named_by_hour_product_and_resolution():
+    cfg = _config("/c", cache_dir=Path("/c/20240926_d1_helene"),
+                  res_label="6km")
+    t = datetime(2024, 9, 27, 7)
+    assert cfg.output_path("stage4", t) == Path(
+        "/c/20240926_d1_helene/2024092707_stage4_6km.nc")
+    assert cfg.output_path("mrms", t).name == "2024092707_mrms_6km.nc"
+    assert cfg.settings_path.name == "regrid_settings_6km.txt"
+    # a different resolution never reuses these files
+    other = _config("/c", cache_dir=Path("/c/20240926_d1_helene"),
+                    res_label="3km")
+    assert other.output_path("stage4", t) != cfg.output_path("stage4", t)
+    assert other.settings_path != cfg.settings_path
 
 
-def test_cache_settings_are_checked_per_deployment():
+def test_two_resolutions_keep_separate_settings_in_one_folder():
     with tempfile.TemporaryDirectory() as tmp:
-        a = _config(tmp, cache_dir=Path(tmp), prefix="a_6km")
-        b = _config(tmp, cache_dir=Path(tmp), prefix="b_6km",
-                    grid_spec="lambert 999 999 b")
+        a = _config(tmp, cache_dir=Path(tmp), res_label="6km")
+        b = _config(tmp, cache_dir=Path(tmp), res_label="3km",
+                    grid_spec="lambert 300 300 b")
         met_regrid.check_cache_settings(a)
-        met_regrid.check_cache_settings(b)       # different grid, own settings
+        met_regrid.check_cache_settings(b)
         assert a.settings_path.exists() and b.settings_path.exists()
 
 
