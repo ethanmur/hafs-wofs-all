@@ -150,6 +150,7 @@ def render_case(case, orion=ORION):
     lines += [
         "",
         f"out_dir:          {orion}/output/{label}/{dep}/",
+        f"regrid_cache_dir: {orion}/data/regrid_obs/{label}/{dep}/",
         f"mrms_cache_dir:   {orion}/data/mrms/",
         f"stage4_cache_dir: {orion}/data/stage-iv/",
         "",

@@ -15,9 +15,9 @@ def test_parse_args_requires_command():
         pass
 
 
-def test_parse_args_explicit_command():
-    yaml_path, command = run.parse_args(["case.yaml", "regrid-obs"])
-    assert yaml_path == "case.yaml" and command == "regrid-obs"
+def test_parse_args_accepts_every_current_command():
+    for command in run.COMMANDS:
+        assert run.parse_args(["case.yaml", command]) == ("case.yaml", command)
 
 
 def test_parse_args_rejects_unknown_command():
@@ -28,9 +28,11 @@ def test_parse_args_rejects_unknown_command():
         pass
 
 
-def test_parse_args_rejects_removed_hafs_only_commands():
-    for command in ("parent", "ets", "rmse", "cycles", "cycles-compare",
-                    "all", "compare", "replot"):
+def test_parse_args_rejects_removed_commands():
+    # HAFS-only products, and commands waiting for their plan steps (C, D)
+    for command in ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
+                    "compare", "replot", "build-masks", "plot-masked",
+                    "list-windows", "regrid-hafs", "plot-hafs"):
         try:
             run.parse_args(["case.yaml", command])
             assert False, f"{command} should be rejected"

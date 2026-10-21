@@ -1,300 +1,133 @@
-"""Unit tests for obs_cases' pure logic (no network, no Hercules data).
-
-Run directly:   python3 analysis/tests/test_obs_cases.py
-Or via pytest:  pytest analysis/tests/test_obs_cases.py -v
-"""
+"""Unit tests for obs_cases' pure logic (no network, no cluster data)."""
+import json
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
-# Make analysis/ importable when run from anywhere.
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import numpy as np
-import yaml
-
-from obs_cases import (
-    ObsCase, from_yaml, hourly_timestamps, check_cache_complete,
-    mrms_s3_key,
-)
-import aorc_common
+import deployment_case as dc
+import obs_cases
 import stage4_hourly
+from obs_cases import (hourly_timestamps, check_cache_complete, mrms_s3_key,
+                       regrid_config, grid_shape_from_json, download_obs,
+                       regrid_obs)
 
 
-def _minimal_case(**overrides):
+def _case(tmp_path, **overrides):
     kwargs = dict(
-        storm_name="Test Storm", best_track=Path("/tmp/bt.dat"),
-        valid_start=datetime(2024, 9, 26, 0), valid_end=datetime(2024, 9, 26, 6),
-        domain=(15.0, 42.0, -100.0, -60.0), out_dir=Path("/tmp/out"),
-        mrms_cache_dir=Path("/tmp/mrms"), stage4_cache_dir=Path("/tmp/st4"),
-        aorc_cache_dir=Path("/tmp/aorc"),
-    )
+        case_slug="2024_02l_beryl_20240708_d1", storm_name="Beryl",
+        storm_id="2024-02l", deployment="20240708_d1",
+        best_track=tmp_path / "bt.dat", truth_source="stage4",
+        wofs_root=tmp_path / "wofs" / "2024_BERYL" / "20240708_d1",
+        wofs_available=True, complete_windows=3,
+        out_dir=tmp_path / "out", mrms_cache_dir=tmp_path / "mrms",
+        stage4_cache_dir=tmp_path / "st4", regrid_cache_dir=tmp_path / "rg",
+        valid_start=datetime(2024, 9, 26, 0), valid_end=datetime(2024, 9, 26, 2))
     kwargs.update(overrides)
-    return ObsCase(**kwargs)
+    return dc.DeploymentCase(**kwargs)
+
+
+def _touch_mrms(cache_dir, valid_dt):
+    _, fname = mrms_s3_key(valid_dt)
+    path = Path(cache_dir) / fname.replace(".gz", "")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+
+def _write_grid_json(case, nx=150, ny=150):
+    case.out_dir.mkdir(parents=True, exist_ok=True)
+    case.grid_json_path.write_text(json.dumps({
+        "name": case.case_slug, "nx": nx, "ny": ny,
+        "met_spec": f"lambert {nx} {ny} 29.0 -86.8 -82.25 6.0 6371.2 30.0 "
+                    "60.0 N"}))
 
 
 def test_hourly_timestamps_end_of_hour_convention():
     ts = hourly_timestamps(datetime(2024, 9, 26, 0), datetime(2024, 9, 26, 3))
     assert ts == [datetime(2024, 9, 26, 1), datetime(2024, 9, 26, 2),
-                 datetime(2024, 9, 26, 3)]
+                  datetime(2024, 9, 26, 3)]
 
 
-def test_from_yaml_round_trip_and_defaults():
-    with tempfile.TemporaryDirectory() as tmp:
-        yaml_path = Path(tmp) / "case.yaml"
-        yaml_path.write_text(yaml.safe_dump({
-            "storm_name": "Test Storm",
-            "best_track": "/tmp/bt.dat",
-            "valid_start": 2024092400,
-            "valid_end": 2024092906,
-            "domain": [15.0, 42.0, -100.0, -60.0],
-            "skip_mrms": True,
-            "skip_stage4": True,
-        }))
-        case = from_yaml(yaml_path)
-        assert isinstance(case, ObsCase)
-        assert case.storm_name == "Test Storm"
-        assert case.valid_start == datetime(2024, 9, 24, 0)
-        assert case.valid_end == datetime(2024, 9, 29, 6)
-        assert case.skip_mrms is True
-        assert case.skip_stage4 is True
-        assert case.skip_aorc is False          # default
-        assert case.output_slug == "case_2024092400_2024092906"
+def test_mrms_key_names_the_hour_end():
+    key, fname = mrms_s3_key(datetime(2024, 9, 26, 1))
+    assert fname == ("MRMS_MultiSensor_QPE_01H_Pass2_00.00_"
+                     "20240926-010000.grib2.gz")
+    assert key == f"CONUS/MultiSensor_QPE_01H_Pass2_00.00/20240926/{fname}"
 
 
-def test_from_yaml_regrid_block_is_optional():
-    with tempfile.TemporaryDirectory() as tmp:
-        base = {"best_track": "/tmp/bt.dat", "valid_start": 2024092400,
-                "valid_end": 2024092406, "domain": [15.0, 42.0, -100.0, -60.0]}
-        plain = Path(tmp) / "plain.yaml"
-        plain.write_text(yaml.safe_dump(base))
-        assert from_yaml(plain).regrid is None
-
-        with_regrid = Path(tmp) / "regrid.yaml"
-        with_regrid.write_text(yaml.safe_dump({**base, "regrid": {
-            "grid_template": "/hafs/**/*parent.atm.f*.grb2",
-            "cache_dir": "/cache", "tolerance_pct": 1.5}}))
-        cfg = from_yaml(with_regrid).regrid
-        assert cfg.method == "BUDGET" and cfg.tolerance_pct == 1.5
-        assert cfg.cache_dir == Path("/cache")
+def test_check_cache_complete_mrms(tmp_path):
+    case = _case(tmp_path, truth_source="mrms")
+    for t in hourly_timestamps(case.valid_start, case.valid_end):
+        _touch_mrms(case.mrms_cache_dir, t)
+    assert check_cache_complete(case) == []
 
 
-def test_from_yaml_requires_core_fields():
-    with tempfile.TemporaryDirectory() as tmp:
-        yaml_path = Path(tmp) / "case.yaml"
-        yaml_path.write_text(yaml.safe_dump({"storm_name": "Test Storm"}))
-        try:
-            from_yaml(yaml_path)
-            assert False, "expected a KeyError for the missing fields"
-        except KeyError:
-            pass
+def test_check_cache_complete_flags_missing_mrms_hours(tmp_path):
+    case = _case(tmp_path, truth_source="mrms")
+    _touch_mrms(case.mrms_cache_dir, datetime(2024, 9, 26, 1))
+    missing = check_cache_complete(case)
+    assert len(missing) == 1 and "02Z" in missing[0]
 
 
-def _touch_mrms(cache_dir, valid_dt):
-    _, fname = mrms_s3_key(valid_dt)
-    (Path(cache_dir) / fname.replace(".gz", "")).parent.mkdir(
-        parents=True, exist_ok=True)
-    (Path(cache_dir) / fname.replace(".gz", "")).touch()
+def test_check_cache_complete_stage4(tmp_path, monkeypatch):
+    case = _case(tmp_path, valid_end=datetime(2024, 9, 26, 3))
+    monkeypatch.setattr(stage4_hourly, "index_stage4_hourly",
+                        lambda d: {datetime(2024, 9, 26, 2): [Path(d) / "x"]})
+    missing = check_cache_complete(case)
+    assert len(missing) == 2
+    assert any("01Z" in m for m in missing) and any("03Z" in m for m in missing)
 
 
-def _touch_aorc(cache_dir, valid_dt):
-    path = aorc_common.aorc_cache_path(cache_dir, valid_dt)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.touch()
+def test_the_truth_product_decides_what_must_be_cached(tmp_path, monkeypatch):
+    # stage4 is the truth: MRMS files are not needed unless asked for
+    case = _case(tmp_path)
+    monkeypatch.setattr(stage4_hourly, "index_stage4_hourly",
+                        lambda d: {t: [Path(d) / "x"] for t in
+                                   hourly_timestamps(case.valid_start,
+                                                     case.valid_end)})
+    assert check_cache_complete(case) == []
+    both = _case(tmp_path, regrid=dc.RegridSettings(sources=("stage4", "mrms")))
+    assert len(check_cache_complete(both)) == 2     # no MRMS cached
 
 
-def test_check_cache_complete_empty_when_everything_cached():
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
-        case = _minimal_case(
-            skip_stage4=True, mrms_cache_dir=base / "mrms",
-            aorc_cache_dir=base / "aorc",
-            valid_start=datetime(2024, 9, 26, 0),
-            valid_end=datetime(2024, 9, 26, 2),
-        )
-        for t in hourly_timestamps(case.valid_start, case.valid_end):
-            _touch_mrms(case.mrms_cache_dir, t)
-            _touch_aorc(case.aorc_cache_dir, t)
-        assert check_cache_complete(case) == []
+def test_regrid_config_reads_the_grid_spec_and_keys_the_cache_on_resolution(
+        tmp_path):
+    case = _case(tmp_path)
+    _write_grid_json(case)
+    cfg = regrid_config(case)
+    assert cfg.grid_spec.startswith("lambert 150 150")
+    assert cfg.cache_dir == tmp_path / "rg" / "6km"
+    assert cfg.method == "BUDGET" and cfg.width == 2
+    assert cfg.output_path("stage4", datetime(2024, 9, 26, 1)).name == \
+        "stage4_2024092601.nc"
 
 
-def test_check_cache_complete_flags_missing_hours():
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
-        case = _minimal_case(
-            skip_stage4=True, mrms_cache_dir=base / "mrms",
-            aorc_cache_dir=base / "aorc",
-            valid_start=datetime(2024, 9, 26, 0),
-            valid_end=datetime(2024, 9, 26, 2),
-        )
-        # Only cache one of the two needed hours, and only for MRMS.
-        _touch_mrms(case.mrms_cache_dir, datetime(2024, 9, 26, 1))
-        missing = check_cache_complete(case)
-        assert len(missing) == 3   # MRMS h2, AORC h1, AORC h2
-        assert any("MRMS" in m and "02Z" in m for m in missing)
-        assert any("AORC" in m and "01Z" in m for m in missing)
+def test_regrid_config_without_a_grid_says_to_run_build_grid(tmp_path):
+    with pytest.raises(SystemExit) as err:
+        regrid_config(_case(tmp_path))
+    assert "build-grid" in str(err.value)
 
 
-def test_check_cache_complete_flags_missing_stage4_hours(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmp:
-        case = _minimal_case(
-            skip_stage4=False, skip_mrms=True, skip_aorc=True,
-            stage4_cache_dir=Path(tmp),
-            valid_start=datetime(2024, 9, 26, 0),
-            valid_end=datetime(2024, 9, 26, 3),
-        )
-        # Only hour 2 is "in the cache" -- fake the parsed ST4.<day> index
-        # so this test doesn't need a real GRIB fixture.
-        monkeypatch.setattr(
-            stage4_hourly, "index_stage4_hourly",
-            lambda cache_dir_str: {
-                datetime(2024, 9, 26, 2): [Path(tmp) / "ST4.20240926"],
-            },
-        )
-        missing = check_cache_complete(case)
-        assert len(missing) == 2   # hours 1 and 3 missing
-        assert any("01Z" in m for m in missing)
-        assert any("03Z" in m for m in missing)
-        assert not any("02Z" in m for m in missing)
+def test_grid_shape_from_json_is_rows_then_columns(tmp_path):
+    case = _case(tmp_path)
+    _write_grid_json(case, nx=150, ny=140)
+    assert grid_shape_from_json(case.grid_json_path) == (140, 150)
 
 
-def test_check_cache_complete_empty_when_stage4_cached(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmp:
-        case = _minimal_case(
-            skip_stage4=False, skip_mrms=True, skip_aorc=True,
-            stage4_cache_dir=Path(tmp),
-            valid_start=datetime(2024, 9, 26, 0),
-            valid_end=datetime(2024, 9, 26, 2),
-        )
-        fake_path = Path(tmp) / "ST4.20240926"
-        monkeypatch.setattr(
-            stage4_hourly, "index_stage4_hourly",
-            lambda cache_dir_str: {
-                datetime(2024, 9, 26, 1): [fake_path],
-                datetime(2024, 9, 26, 2): [fake_path],
-            },
-        )
-        assert check_cache_complete(case) == []
+def test_unavailable_deployment_is_skipped_by_every_obs_command(tmp_path):
+    case = _case(tmp_path, wofs_available=False, valid_start=None,
+                 valid_end=None)
+    for command in (download_obs, regrid_obs):
+        with pytest.raises(SystemExit) as err:
+            command(case)
+        assert "no complete WoFS window" in str(err.value)
 
 
-class _FakeMonkeypatch:
-    """Minimal stand-in so this file also runs standalone (no pytest)."""
-
-    def __init__(self):
-        self._saved = []
-
-    def setattr(self, obj, name, value):
-        self._saved.append((obj, name, getattr(obj, name)))
-        setattr(obj, name, value)
-
-    def undo(self):
-        for obj, name, value in reversed(self._saved):
-            setattr(obj, name, value)
-
-
-def test_from_yaml_init_range_is_optional_and_independent_of_window():
-    with tempfile.TemporaryDirectory() as tmp:
-        base = {"best_track": "/tmp/bt.dat", "valid_start": 2024070800,
-                "valid_end": 2024071000,
-                "domain": [15.0, 42.0, -100.0, -60.0]}
-        plain = Path(tmp) / "plain.yaml"
-        plain.write_text(yaml.safe_dump(base))
-        case = from_yaml(plain)
-        assert case.init_start is None and case.init_end is None
-
-        # init_start may precede valid_start to reach long lead times
-        ranged = Path(tmp) / "ranged.yaml"
-        ranged.write_text(yaml.safe_dump({**base, "init_start": 2024070500}))
-        case = from_yaml(ranged)
-        assert case.init_start == datetime(2024, 7, 5, 0)
-        assert case.init_end == datetime(2024, 7, 10, 0)   # defaults to window
-
-
-def test_from_yaml_rejects_impossible_init_range():
-    with tempfile.TemporaryDirectory() as tmp:
-        base = {"best_track": "/tmp/bt.dat", "valid_start": 2024070800,
-                "valid_end": 2024071000,
-                "domain": [15.0, 42.0, -100.0, -60.0]}
-        for bad in ({"init_start": 2024070500, "init_end": 2024070400},
-                    {"init_start": 2024071200},          # after valid_end
-                    {"init_start": "not-a-time"}):
-            path = Path(tmp) / "bad.yaml"
-            path.write_text(yaml.safe_dump({**base, **bad}))
-            try:
-                from_yaml(path)
-            except ValueError:
-                continue
-            raise AssertionError(f"expected ValueError for {bad}")
-
-
-def test_from_yaml_multiple_wofs_domains():
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "multi.yaml"
-        path.write_text(yaml.safe_dump({
-            "best_track": "/tmp/bt.dat", "valid_start": 2024070800,
-            "valid_end": 2024071000, "domain": [15.0, 42.0, -100.0, -60.0],
-            "wofs_domains": [
-                {"name": "wofs_tx", "domain": [26.0, 32.0, -99.0, -93.0],
-                 "valid_start": 2024070800, "valid_end": 2024070812},
-                {"name": "wofs_oh", "domain": [36.0, 42.0, -89.0, -83.0],
-                 "valid_start": 2024070918, "valid_end": 2024071006}]}))
-        case = from_yaml(path)
-        assert [d.name for d in case.wofs_domains] == ["wofs_tx", "wofs_oh"]
-        assert case.wofs_domains[0].valid_end == datetime(2024, 7, 8, 12)
-        # the convenience property is the union extent of all deployments
-        assert case.wofs_domain == (26.0, 42.0, -99.0, -83.0)
-
-
-def test_from_yaml_grid_and_wofs_domain():
-    with tempfile.TemporaryDirectory() as tmp:
-        base = {"best_track": "/tmp/bt.dat", "valid_start": 2024070800,
-                "valid_end": 2024071000,
-                "domain": [15.0, 42.0, -100.0, -60.0]}
-        plain = Path(tmp) / "plain.yaml"
-        plain.write_text(yaml.safe_dump(base))
-        case = from_yaml(plain)
-        assert case.grid.res_km == 6.0 and case.grid.pad_km == 750.0
-        assert case.wofs_domain is None
-
-        full = Path(tmp) / "full.yaml"
-        full.write_text(yaml.safe_dump({
-            **base, "wofs_domain": [31.5, 39.5, -87.0, -78.0],
-            "verification_grid": {"res_km": 5.0, "pad_km": 900.0}}))
-        case = from_yaml(full)
-        assert case.wofs_domain == (31.5, 39.5, -87.0, -78.0)
-        assert case.grid.res_km == 5.0 and case.grid.pad_km == 900.0
-        assert case.grid.grid_name == "lambert5km"
-
-
-def test_from_yaml_reports_bad_grid_block_with_the_file():
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "bad.yaml"
-        path.write_text(yaml.safe_dump({
-            "best_track": "/tmp/bt.dat", "valid_start": 2024070800,
-            "valid_end": 2024071000, "domain": [15.0, 42.0, -100.0, -60.0],
-            "verification_grid": {"pad_km": 100.0}}))
-        try:
-            from_yaml(path)
-        except ValueError as err:
-            assert "pad_km" in str(err) and "bad.yaml" in str(err)
-            return
-        raise AssertionError("expected ValueError")
-
-
-def _run_all():
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    for fn in fns:
-        needs_mp = "monkeypatch" in fn.__code__.co_varnames[:fn.__code__.co_argcount]
-        mp = _FakeMonkeypatch() if needs_mp else None
-        try:
-            fn(mp) if needs_mp else fn()
-        finally:
-            if mp is not None:
-                mp.undo()
-        print(f"PASS {fn.__name__}")
-    print(f"\n{len(fns)} passed")
-
-
-if __name__ == "__main__":
-    _run_all()
+def test_download_obs_for_a_stage4_deployment_fetches_nothing(tmp_path, capsys):
+    download_obs(_case(tmp_path))
+    out = capsys.readouterr().out
+    assert "not fetched by this command" in out
+    assert "nothing to fetch" in out

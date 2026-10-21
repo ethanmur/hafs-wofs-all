@@ -1,20 +1,20 @@
 """Distributions and 1:1 comparisons of the regridded obs (stats-regrid).
 
 Everything here runs on the MET-regridded fields written by regrid-obs, so
-all three products share one grid and a grid cell can be compared directly
-across products. Per hour and for the whole window, into
-case.regrid_plot_dir:
-  distributions/dist_<variant>_<YYYYMMDDHH>.png   MRMS/Stage IV/AORC overlaid
-  one-to-one/oneone_<variant>_<YYYYMMDDHH>.png    the three product pairs
+both products share one grid and a grid cell can be compared directly across
+products. It needs both MRMS and Stage IV regridded (`regrid.sources`), which
+is the MRMS sensitivity check; with one product it draws distributions only.
+Per hour and for the whole scored period, into case.regrid_plot_dir:
+  distributions/dist_<variant>_<YYYYMMDDHH>.png   each product's distribution
+  one-to-one/oneone_<variant>_<YYYYMMDDHH>.png    the product pair, cell by cell
   distributions/dist_<variant>_combined.png, one-to-one/oneone_<variant>_combined.png
   stats_sources_<case>.csv, stats_pairs_<case>.csv
 
-`variant` is "all" (every cell a product reports) or "land" (restricted to
-the cells AORC covers, which is land only). Each product's distribution
-uses its own valid cells, and each pair uses the cells where both products
-report -- so MRMS-vs-Stage IV keeps the ocean while anything against AORC
-is land by construction. Dry cells (< 0.1 mm) are left out of the
-distributions and reported as a dry fraction instead.
+`variant` is "all": every cell a product reports. Each product's distribution
+uses its own valid cells and the pair uses the cells where both report. Dry
+cells (< 0.1 mm) are left out of the distributions and reported as a dry
+fraction instead. A variant restricted to the observation-validity region is
+added with that mask in plan step C.
 
 The window-combined figures come from histograms accumulated hour by hour,
 never from a pooled point cloud, so memory stays flat over a long window.
@@ -43,7 +43,7 @@ N_BINS = 40
 BIN_EDGES = np.logspace(np.log10(MIN_RAIN_MM), np.log10(MAX_BIN_MM), N_BINS + 1)
 BIN_CENTERS = np.sqrt(BIN_EDGES[:-1] * BIN_EDGES[1:])
 # Okabe-Ito: distinguishable under red-green colour blindness.
-COLORS = {"mrms": "#e69f00", "stage4": "#0072b2", "aorc": "#009e73"}
+COLORS = {"mrms": "#e69f00", "stage4": "#0072b2"}
 DPI = 130
 
 
@@ -259,18 +259,15 @@ def _pair_points(field_a, field_b, mask):
 
 def stats_regrid(case):
     """Distribution and 1:1 diagnostics over the regridded obs."""
-    cfg = case.regrid
-    if cfg is None:
-        raise SystemExit("ERROR: stats-regrid needs a `regrid:` block in the YAML")
+    if not case.wofs_available:
+        raise SystemExit(f"stats-regrid: {case.case_slug} has no complete WoFS "
+                         "window; nothing to summarise.")
+    cfg = oc.regrid_config(case)
     timestamps = oc.hourly_timestamps(case.valid_start, case.valid_end)
-    sources = available_sources(case, timestamps, "stats-regrid")
+    sources = available_sources(case, cfg, timestamps)
     oc._print_case_header(case, "Stats on regridded obs", sources)
 
     variants = ["all"]
-    if "aorc" in sources:
-        variants.append("land")
-    else:
-        print("AORC skipped, so there is no land mask -- 'all' variant only.")
     pairs = list(itertools.combinations(sources, 2))
     out = case.regrid_plot_dir
     print(f"Regrid cache: {cfg.cache_dir}")
@@ -287,18 +284,12 @@ def stats_regrid(case):
     total = {v: ({s: SourceStats() for s in sources},
                  {p: PairStats() for p in pairs}) for v in variants}
     src_rows, pair_rows = [], []
-    reported_mask = False
     started = time.monotonic()
     for i, t in enumerate(timestamps, 1):
         fields = {s: met_regrid.read_regridded(cfg.output_path(s, t))[2]
                   for s in sources}
-        land = np.isfinite(fields["aorc"]) if "aorc" in fields else None
-        if land is not None and not reported_mask:
-            reported_mask = True
-            print(f"Land mask (AORC coverage): {int(land.sum()):,} of "
-                  f"{land.size:,} cells ({100 * land.mean():.1f}%)", flush=True)
         for variant in variants:
-            mask = land if variant == "land" else None
+            mask = None
             hour_src = {s: SourceStats() for s in sources}
             hour_pair = {p: PairStats() for p in pairs}
             for s in sources:
@@ -365,5 +356,4 @@ def stats_regrid(case):
 
 
 def _variant_note(variant):
-    return ("land only, AORC coverage" if variant == "land"
-            else "every cell each product reports, ocean included")
+    return "every cell each product reports"

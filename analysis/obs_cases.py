@@ -1,10 +1,11 @@
-"""Case config and obs data handling for MRMS, Stage IV, and AORC.
+"""Observation data for one deployment: MRMS download, cache check, regrid-obs.
 
-Holds the obs-case YAML model shared by every obs command, the login-node
-download, the cache-completeness check, and regrid-obs itself (MET
-regridding of each cached obs hour onto the HAFS parent grid). The
-comparisons built on top of the regridded output live in
-obs_regrid_plots.py (maps) and obs_regrid_stats.py (distributions, 1:1).
+Works on a DeploymentCase (deployment_case.py). The truth product is Stage IV
+by default and `truth_source: mrms` switches it; `regrid.sources` regrids both,
+for the MRMS sensitivity check. Each obs hour in the scored period is regridded
+once with MET onto the deployment's own 6 km grid (written by build-grid), so
+every later comparison is cell for cell. The maps and distributions built on
+the regridded output live in obs_regrid_plots.py and obs_regrid_stats.py.
 
 Usage:
     python analysis/run.py storms/<case>.yaml download-obs
@@ -16,28 +17,18 @@ import gzip
 import io
 import sys
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
-from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cfgrib
 import numpy as np
-import yaml
 from botocore import UNSIGNED
 from botocore.config import Config
 import boto3
 
-import aorc_common
 import met_regrid
-# aliased: a dataclass field named `masks` would shadow the
-# module inside the class body, where the assignment is bound
-# before the annotation is evaluated.
-import hafs_windows as hafs_lib
-import masks as mask_lib
-import verification_grid
 import stage4_hourly
 
 
@@ -85,158 +76,39 @@ def load_mrms_hour(s3, hour_end_dt, cache_dir, download=True):
 
 
 # =============================================================================
-# Config
-# =============================================================================
-
-@dataclass
-class ObsCase:
-    storm_name: str
-    best_track: Path
-    valid_start: datetime
-    valid_end: datetime
-    domain: tuple                 # (lat_min, lat_max, lon_min, lon_max)
-    out_dir: Path
-    mrms_cache_dir: Path
-    stage4_cache_dir: Path        # holds ST4.<YYYYMMDD> hourly source files
-    aorc_cache_dir: Path
-    # Stage IV is the truth product for the multi-case study: the MRMS
-    # archive only reaches back to 2020-10, which excludes half the sample.
-    truth_source: str = "stage4"
-    skip_mrms: bool = False
-    skip_stage4: bool = False
-    skip_aorc: bool = False
-    case_slug: str = "obs_case"
-    regrid: Optional[met_regrid.RegridConfig] = None
-    log_dir: Optional[Path] = None           # default: out_dir/logs
-    regrid_plot_dir: Optional[Path] = None   # plot-regrid output root
-    zoom_domain: Optional[tuple] = None      # (lat_min, lat_max, lon_min, lon_max)
-    regrid_panels: tuple = ()                # empty = every panel
-    # Model cycles to pull and verify. Independent of the scoring window:
-    # init_start may precede valid_start to reach long lead times, and the
-    # verification grid still follows the valid window, not init_start.
-    init_start: Optional[datetime] = None
-    init_end: Optional[datetime] = None
-    # WoFS deployments for this case; each keeps its own time window, since
-    # WoFS is re-sited between events and a storm can have several.
-    wofs_domains: list = field(default_factory=list)
-    grid: Optional[verification_grid.GridConfig] = None
-    hafs: Optional[hafs_lib.HafsConfig] = None
-    hafs_plot_dir: Optional[Path] = None     # plot-hafs output root
-    hafs_plot_init_hours: tuple = ()         # which cycles to draw; () = 00Z
-    masks: Optional[mask_lib.MaskConfig] = None
-
-    @property
-    def wofs_domain(self):
-        """Union extent of every WoFS deployment, or None if there are none."""
-        if not self.wofs_domains:
-            return None
-        boxes = [d.domain for d in self.wofs_domains]
-        return (min(b[0] for b in boxes), max(b[1] for b in boxes),
-                min(b[2] for b in boxes), max(b[3] for b in boxes))
-
-    @property
-    def output_slug(self):
-        return (f"{self.case_slug}_{self.valid_start:%Y%m%d%H}_"
-                f"{self.valid_end:%Y%m%d%H}")
-
-
-def from_yaml(yaml_path):
-    yaml_path = Path(yaml_path)
-    with open(yaml_path) as fh:
-        cfg = yaml.safe_load(fh) or {}
-    for key in ("best_track", "valid_start", "valid_end", "domain"):
-        if key not in cfg:
-            raise KeyError(f"'{key}' is required in an obs-case YAML "
-                           f"({yaml_path})")
-    out_dir = (Path(cfg["out_dir"]) if cfg.get("out_dir")
-              else Path("analysis/output") / yaml_path.stem)
-    valid_start = datetime.strptime(str(cfg["valid_start"]), "%Y%m%d%H")
-    valid_end = datetime.strptime(str(cfg["valid_end"]), "%Y%m%d%H")
-    if valid_end <= valid_start:
-        raise ValueError(f"valid_end must be after valid_start in {yaml_path}")
-    init_start = verification_grid.parse_stamp(
-        cfg.get("init_start"), "init_start", yaml_path)
-    init_end = verification_grid.parse_stamp(
-        cfg.get("init_end"), "init_end", yaml_path)
-    if init_start is not None and init_end is None:
-        init_end = valid_end          # cycles past the window score nothing
-    if init_start is not None and init_end <= init_start:
-        raise ValueError(f"init_end must be after init_start in {yaml_path}")
-    if init_start is not None and init_start > valid_end:
-        raise ValueError(f"init_start is after valid_end in {yaml_path}; no "
-                         "cycle initialized then can reach the window")
-    try:
-        grid = verification_grid.grid_config_from_dict(
-            cfg.get("verification_grid"))
-        wofs_domains = verification_grid.wofs_domains_from_cfg(cfg, yaml_path)
-        mask_cfg = mask_lib.mask_config_from_dict(cfg.get("masks"))
-        hafs_cfg = hafs_lib.hafs_config_from_dict(cfg.get("hafs"),
-                                                 f" in {yaml_path}")
-    except ValueError as err:
-        raise ValueError(f"{err} in {yaml_path}") from None
-    hplots = cfg.get("hafs_plots") or {}
-    unknown = set(hplots) - {"out_dir", "init_hours"}
-    if unknown:
-        raise ValueError(f"unknown hafs_plots keys {sorted(unknown)} in "
-                         f"{yaml_path}")
-    init_hours = tuple(int(h) for h in (hplots.get("init_hours") or ()))
-    if any(h < 0 or h > 23 for h in init_hours):
-        raise ValueError(f"hafs_plots.init_hours must be 0-23 in {yaml_path}")
-    truth_source = str(cfg.get("truth_source", "stage4")).lower()
-    if truth_source not in met_regrid.SOURCES:
-        raise ValueError(f"truth_source must be one of {met_regrid.SOURCES} "
-                         f"in {yaml_path}, got {truth_source!r}")
-    plots = cfg.get("regrid_plots") or {}
-    panels = tuple(str(v) for v in (plots.get("panels") or ()))
-    known = ("compare-regrid", "compare-products", "compare-anomaly")
-    bad = [k for k in panels if k not in known]
-    if bad:
-        raise ValueError(f"regrid_plots.panels has unknown panel(s) {bad}; "
-                         f"expected any of {known} in {yaml_path}")
-    zoom = plots.get("zoom_domain")
-    if zoom is not None and len(zoom) != 4:
-        raise ValueError("regrid_plots.zoom_domain must be "
-                         f"[lat_min, lat_max, lon_min, lon_max] in {yaml_path}")
-    return ObsCase(
-        storm_name=cfg.get("storm_name", "Storm"),
-        best_track=Path(cfg["best_track"]),
-        valid_start=valid_start,
-        valid_end=valid_end,
-        domain=tuple(cfg["domain"]),
-        out_dir=out_dir,
-        mrms_cache_dir=Path(cfg.get("mrms_cache_dir", "/tmp/mrms_cache")),
-        stage4_cache_dir=Path(cfg.get("stage4_cache_dir", "/tmp/stage4_cache")),
-        aorc_cache_dir=Path(cfg.get("aorc_cache_dir", "/tmp/aorc_cache")),
-        truth_source=truth_source,
-        skip_mrms=bool(cfg.get("skip_mrms", False)),
-        skip_stage4=bool(cfg.get("skip_stage4", False)),
-        skip_aorc=bool(cfg.get("skip_aorc", False)),
-        case_slug=yaml_path.stem,
-        log_dir=Path(cfg["log_dir"]) if cfg.get("log_dir") else None,
-        regrid=met_regrid.regrid_config_from_dict(cfg.get("regrid")),
-        regrid_plot_dir=(Path(plots["out_dir"]) if plots.get("out_dir")
-                         else out_dir / "regrid"),
-        zoom_domain=tuple(float(v) for v in zoom) if zoom else None,
-        regrid_panels=panels,
-        init_start=init_start,
-        init_end=init_end,
-        wofs_domains=wofs_domains,
-        grid=grid,
-        masks=mask_cfg,
-        hafs=hafs_cfg,
-        hafs_plot_dir=(Path(hplots["out_dir"]) if hplots.get("out_dir")
-                       else out_dir / "hafs-compare"),
-        hafs_plot_init_hours=init_hours,
-    )
-
-
-# =============================================================================
-# Timestamps
+# Timestamps and the regrid configuration
 # =============================================================================
 
 def hourly_timestamps(t0, t1):
+    """End-of-hour stamps of every hour in (t0, t1]. The obs files are stamped
+    at the END of their hour, so the window (15Z, 18Z] is the 16Z, 17Z and 18Z
+    files."""
     n_hours = int(round((t1 - t0).total_seconds() / 3600))
     return [t0 + timedelta(hours=h) for h in range(1, n_hours + 1)]
+
+
+def regrid_config(case):
+    """The MET regrid for this deployment, aimed at the grid build-grid wrote."""
+    path = case.grid_json_path
+    try:
+        spec, name = met_regrid.read_grid_json(path)
+    except FileNotFoundError:
+        raise SystemExit(f"ERROR: no grid for this deployment ({path}). "
+                         "Run build-grid first:\n  python analysis/run.py "
+                         "<yaml> build-grid") from None
+    settings = case.regrid
+    return met_regrid.RegridConfig(
+        cache_dir=case.regrid_cache_dir / f"{case.res_km:g}km",
+        grid_spec=spec, grid_name=name or case.case_slug,
+        method=settings.method, width=settings.width,
+        vld_thresh=settings.vld_thresh, tolerance_pct=settings.tolerance_pct,
+        met_bin_dir=settings.met_bin_dir, fields=dict(settings.fields))
+
+
+def _require_window(case, command):
+    if not case.wofs_available:
+        raise SystemExit(f"{command}: {case.case_slug} has no complete WoFS "
+                         "window, so there is nothing to verify; skipping.")
 
 
 # =============================================================================
@@ -244,104 +116,60 @@ def hourly_timestamps(t0, t1):
 # =============================================================================
 
 def download_obs(case):
-    """Login-node command: populate the raw MRMS/AORC caches only.
+    """Login-node command: populate the raw MRMS cache.
 
     Stage IV hourly data is NOT fetched here -- it comes from NCEP's own
-    ST4.<day> archive, obtained outside this repo's tooling, so this
-    command has nothing to do for it beyond what skip_stage4 already
-    documents in the YAML. No regridding, no masking, no plotting, no
-    matplotlib work -- just sequential (never concurrent) requests to
-    MRMS / AORC, so this stays gentle on a login node. regrid-obs (the
-    compute-node command) never downloads on its own; run this first.
+    ST4.<day> archive, obtained outside this repo's tooling -- so for a
+    Stage IV deployment there is nothing to do beyond saying where the files
+    must be. Only products in `regrid_sources` are fetched. Requests are
+    sequential, never concurrent, so this stays gentle on a login node.
+    regrid-obs (the compute-node command) never downloads on its own; run this
+    first.
     """
-    print(f"Download obs: {case.storm_name}")
-    print(f"Window: {case.valid_start:%Y-%m-%d %HZ} -> "
-         f"{case.valid_end:%Y-%m-%d %HZ}")
-    print(f"skip_mrms={case.skip_mrms}  skip_stage4={case.skip_stage4}  "
-         f"skip_aorc={case.skip_aorc}")
-
-    if not case.skip_stage4:
+    _require_window(case, "download-obs")
+    sources = case.regrid_sources
+    _print_case_header(case, "Download obs", sources)
+    if "stage4" in sources:
         print("\nStage IV: not fetched by this command -- place ST4.<day> "
-             f"files under {case.stage4_cache_dir} yourself before running "
-             "regrid-obs.", flush=True)
-
-    if case.skip_mrms and case.skip_aorc:
-        print("\nskip_mrms and skip_aorc both set -- nothing more to fetch.")
+              f"files under {case.stage4_cache_dir} yourself before running "
+              "regrid-obs.", flush=True)
+    if "mrms" not in sources:
+        print("\nMRMS is not a configured source; nothing to fetch.")
         return
 
     timestamps = hourly_timestamps(case.valid_start, case.valid_end)
-    print(f"\nMRMS/AORC: fetching {len(timestamps)} hour(s) "
-         f"{timestamps[0]:%Y-%m-%d %HZ} -> {timestamps[-1]:%Y-%m-%d %HZ}",
-         flush=True)
-
-    s3 = (boto3.client("s3", region_name="us-east-1",
-                       config=Config(signature_version=UNSIGNED))
-         if not case.skip_mrms else None)
+    print(f"\nMRMS: fetching {len(timestamps)} hour(s) "
+          f"{timestamps[0]:%Y-%m-%d %HZ} -> {timestamps[-1]:%Y-%m-%d %HZ}",
+          flush=True)
+    s3 = boto3.client("s3", region_name="us-east-1",
+                      config=Config(signature_version=UNSIGNED))
+    failed = 0
     for t in timestamps:
-        if case.skip_mrms:
-            mstatus = "skipped"
-        else:
-            try:
-                load_mrms_hour(s3, t, case.mrms_cache_dir, download=True)
-                mstatus = "ok"
-            except Exception as e:
-                mstatus = f"FAILED ({e})"
-        if case.skip_aorc:
-            astatus = "skipped"
-        else:
-            try:
-                aorc_common.load_aorc_hour(t, case.domain,
-                                           case.aorc_cache_dir, download=True)
-                astatus = "ok"
-            except Exception as e:
-                astatus = f"FAILED ({e})"
-        print(f"  {t:%Y-%m-%d %HZ}  MRMS={mstatus}  AORC={astatus}",
-             flush=True)
-
-    print("\nDownload complete.")
+        try:
+            load_mrms_hour(s3, t, case.mrms_cache_dir, download=True)
+            status = "ok"
+        except Exception as e:
+            failed += 1
+            status = f"FAILED ({e})"
+        print(f"  {t:%Y-%m-%d %HZ}  MRMS={status}", flush=True)
+    print(f"\nDownload complete{f' ({failed} failed)' if failed else ''}.")
 
 
 # =============================================================================
-# Entry point (compute node) -- reads the cache only, never downloads
+# Cache check -- never touches the network, so safe on a compute node
 # =============================================================================
-
-def regrid_sources(case):
-    """Products regrid-obs will actually regrid.
-
-    Just the truth product unless `regrid.sources` overrides it, minus
-    anything a skip_ flag turns off. Only these need to be cached: the other
-    obs products are used by the obs-vs-obs scripts, which read the native
-    caches directly.
-    """
-    skipped = {"mrms": case.skip_mrms, "stage4": case.skip_stage4,
-               "aorc": case.skip_aorc}
-    wanted = (case.regrid.sources if case.regrid and case.regrid.sources
-              else (case.truth_source,))
-    return [s for s in wanted if not skipped.get(s, False)]
-
 
 def check_cache_complete(case, sources=None):
-    """List of human-readable missing-item strings; empty means every file
-    regrid-obs will need is already cached. Never touches the network, so
-    it's safe on a no-internet compute node. The Stage IV check parses the
-    cached ST4.<day> files' GRIB metadata (stage4_hourly.index_stage4_hourly)
-    rather than a pure path check, since one file holds many hours and
-    there's no filename-only way to know which hours it covers -- that
-    parsing is memoized and gets reused by the real read afterwards, so
-    it's not wasted work.
-
-    `sources` limits the check to the products a command needs; the default
-    is every product not turned off by a skip_ flag."""
+    """Human-readable missing-item strings; empty means every raw file
+    regrid-obs needs is cached. The Stage IV check parses the cached ST4.<day>
+    files' GRIB metadata (stage4_hourly.index_stage4_hourly) rather than
+    checking paths, since one file holds many hours and nothing in the
+    filename says which; that parsing is memoized and reused by the real read.
+    """
+    sources = set(sources if sources is not None else case.regrid_sources)
     missing = []
-    if sources is None:
-        sources = [s for s, skip in (("mrms", case.skip_mrms),
-                                     ("stage4", case.skip_stage4),
-                                     ("aorc", case.skip_aorc)) if not skip]
-    sources = set(sources)
-
     stage4_idx = (stage4_hourly.index_stage4_hourly(str(case.stage4_cache_dir))
                   if "stage4" in sources else {})
-
     for t in hourly_timestamps(case.valid_start, case.valid_end):
         if "mrms" in sources:
             _, fname = mrms_s3_key(t)
@@ -353,11 +181,6 @@ def check_cache_complete(case, sources=None):
             missing.append(f"Stage IV hourly record for {t:%Y-%m-%d %HZ} "
                            f"(expected inside an ST4.<day> file under "
                            f"{case.stage4_cache_dir})")
-        if "aorc" in sources:
-            path = aorc_common.aorc_cache_path(case.aorc_cache_dir, t)
-            if not path.exists():
-                missing.append(f"AORC hour {t:%Y-%m-%d %HZ} "
-                               f"(expected {path})")
     return missing
 
 
@@ -366,8 +189,8 @@ def _exit_if_cache_incomplete(case, command, sources=None):
     if not missing:
         return
     print(f"\nERROR: required data is not cached, and {command} does not "
-         "download it. Run this first (on a node with internet):\n"
-         "  python analysis/run.py <yaml> download-obs\n")
+          "download it. Run this first (on a node with internet):\n"
+          "  python analysis/run.py <yaml> download-obs\n")
     for item in missing[:25]:
         print(f"  missing: {item}")
     if len(missing) > 25:
@@ -375,16 +198,12 @@ def _exit_if_cache_incomplete(case, command, sources=None):
     raise SystemExit(1)
 
 
-def _print_case_header(case, title, sources=None):
-    print(f"{title}: {case.storm_name}")
+def _print_case_header(case, title, sources):
+    print(f"{title}: {case.storm_name} {case.deployment}")
     print(f"Window: {case.valid_start:%Y-%m-%d %HZ} -> "
-         f"{case.valid_end:%Y-%m-%d %HZ}")
-    if sources is None:
-        print(f"skip_mrms={case.skip_mrms}  skip_stage4={case.skip_stage4}  "
-             f"skip_aorc={case.skip_aorc}", flush=True)
-    else:
-        print(f"Sources: {', '.join(sources)}  "
-             f"(truth_source={case.truth_source})", flush=True)
+          f"{case.valid_end:%Y-%m-%d %HZ}")
+    print(f"Sources: {', '.join(sources)}  (truth_source={case.truth_source})",
+          flush=True)
 
 
 # =============================================================================
@@ -398,47 +217,42 @@ def _native_hour(case, source, t, want_latlon):
         path = case.mrms_cache_dir / fname.replace(".gz", "")
         lat, lon, vals = met_regrid.read_grib_field(path, want_latlon)
         return lat, lon, vals, lambda staging: path
-    if source == "stage4":
-        paths = stage4_hourly.index_stage4_hourly(
-            str(case.stage4_cache_dir)).get(t, [])
-        msg = met_regrid.extract_accumulation(paths, t, hours=1)
-        if msg is None:
-            raise FileNotFoundError(
-                f"no 1h Stage IV GRIB message for {t:%Y-%m-%d %HZ} in "
-                f"{[p.name for p in paths]}")
-        lat, lon, vals = met_regrid.read_grib_message(msg, want_latlon)
-        return lat, lon, vals, lambda staging: met_regrid.write_bytes(
-            staging / f"stage4_{t:%Y%m%d%H}.grb2", msg)
-    lat1d, lon1d, vals = aorc_common.load_aorc_hour(
-        t, case.domain, case.aorc_cache_dir, download=False)
-    lat = lon = None
-    if want_latlon:
-        lon, lat = np.meshgrid(lon1d, lat1d)
-    return lat, lon, vals, lambda staging: met_regrid.write_accum_grib2(
-        lat1d, lon1d, vals, t, 1, staging / f"aorc_{t:%Y%m%d%H}.grb2")
+    paths = stage4_hourly.index_stage4_hourly(
+        str(case.stage4_cache_dir)).get(t, [])
+    msg = met_regrid.extract_accumulation(paths, t, hours=1)
+    if msg is None:
+        raise FileNotFoundError(
+            f"no 1h Stage IV GRIB message for {t:%Y-%m-%d %HZ} in "
+            f"{[p.name for p in paths]}")
+    lat, lon, vals = met_regrid.read_grib_message(msg, want_latlon)
+    return lat, lon, vals, lambda staging: met_regrid.write_bytes(
+        staging / f"stage4_{t:%Y%m%d%H}.grb2", msg)
+
+
+def grid_shape_from_json(path):
+    """(ny, nx) the grid JSON promises, to check MET's output against."""
+    import json
+    payload = json.loads(Path(path).read_text())
+    return int(payload["ny"]), int(payload["nx"])
 
 
 def regrid_obs(case):
     """Regrid every cached obs hour with MET and check it conserves rain."""
-    cfg = case.regrid
-    if cfg is None:
-        raise SystemExit("ERROR: regrid-obs needs a `regrid:` block in the YAML")
-    sources = regrid_sources(case)
+    _require_window(case, "regrid-obs")
+    cfg = regrid_config(case)
+    sources = case.regrid_sources
     _print_case_header(case, "Regrid obs", sources)
-    if not sources:
-        print(f"Truth source {case.truth_source!r} is skipped -- "
-              "nothing to regrid.")
-        return
     # Only the products being regridded need to be cached.
     _exit_if_cache_incomplete(case, "regrid-obs", sources)
 
     tool = met_regrid.met_tool("regrid_data_plane", cfg.met_bin_dir)
-    grid_file, grid_desc = met_regrid.resolve_to_grid(cfg)
+    grid_arg, grid_desc = met_regrid.resolve_to_grid(cfg)
+    expected = grid_shape_from_json(case.grid_json_path)
     print(f"MET tool: {tool}")
     print(f"Grid:     {cfg.grid_name}")
     print(f"  to_grid {grid_desc}")
     print(f"Method:   {cfg.method} (width {cfg.width}, "
-         f"vld_thresh {cfg.vld_thresh})")
+          f"vld_thresh {cfg.vld_thresh})")
     print(f"Cache:    {cfg.cache_dir}", flush=True)
 
     staging = cfg.cache_dir / "_staging"
@@ -451,15 +265,15 @@ def regrid_obs(case):
         notes = []
         for source in sources:
             first = source not in native_grids
-            lat, lon, vals, write_met_input = _native_hour(case, source, t,
-                                                           want_latlon=first)
+            lat, lon, vals, write_met_input = _native_hour(
+                case, source, t, want_latlon=first)
             out = cfg.output_path(source, t)
             if out.exists() and met_regrid.valid_value_count(out) == 0:
                 out.unlink()   # an all-missing field is never a valid cache entry
             status = "cached"
             if not out.exists():
                 staged = write_met_input(staging)
-                met_regrid.run_regrid(tool, staged, grid_file, out,
+                met_regrid.run_regrid(tool, staged, grid_arg, out,
                                       cfg.field_spec(source), cfg)
                 # Kept on failure: the staged input is what you need to
                 # inspect with plot_data_plane when MET rejects an hour.
@@ -469,18 +283,17 @@ def regrid_obs(case):
             rlat, rlon, rvals = met_regrid.read_regridded(out)
 
             if target is None:
+                if rvals.shape != expected:
+                    raise ValueError(
+                        f"{out} is {rvals.shape}, but the grid JSON says "
+                        f"{expected}; was the grid rebuilt without clearing "
+                        f"{cfg.cache_dir}?")
                 target = met_regrid.TargetGrid(rlat, rlon)
                 print(f"Target grid: {target.shape[0]} x {target.shape[1]}",
-                     flush=True)
-                outside = target.fraction_outside(*case.domain)
-                if outside > 0:
-                    print(f"WARNING: {100 * outside:.0f}% of the case domain "
-                         "lies outside the grid template -- obs there are "
-                         "not regridded.", flush=True)
+                      flush=True)
             elif rvals.shape != target.shape:
-                raise ValueError(
-                    f"{out} is {rvals.shape}, expected {target.shape} -- was "
-                    "the template changed without changing regrid.grid_name?")
+                raise ValueError(f"{out} is {rvals.shape}, expected "
+                                 f"{target.shape}")
             if first:
                 native_grids[source] = met_regrid.NativeGrid.build(lat, lon,
                                                                    target)
@@ -494,8 +307,8 @@ def regrid_obs(case):
             notes.append(f"{source} {status} {row['mean_pct_diff']:+.2f}%"
                          + (f" {row['flag']}" if row["flag"] else ""))
         print(f"  [{i:>3}/{len(timestamps)}] {t:%Y-%m-%d %HZ}  "
-             + "  ".join(notes)
-             + f"  (+{time.monotonic() - started:.0f}s)", flush=True)
+              + "  ".join(notes)
+              + f"  (+{time.monotonic() - started:.0f}s)", flush=True)
 
     case.out_dir.mkdir(parents=True, exist_ok=True)
     out_csv = case.out_dir / f"regrid_budget_{case.output_slug}.csv"
@@ -509,9 +322,9 @@ def regrid_obs(case):
         print(f"All {len(rows)} source-hours within {cfg.tolerance_pct}%.")
         return
     print(f"{len(flagged)} of {len(rows)} source-hours flagged "
-         f"(|diff| > {cfg.tolerance_pct}% and > {met_regrid.ABS_FLOOR_MM} mm):")
+          f"(|diff| > {cfg.tolerance_pct}% and > {met_regrid.ABS_FLOOR_MM} mm):")
     for r in flagged[:10]:
         print(f"  {r['valid']}  {r['source']:<6}  {r['mean_pct_diff']:+.2f}%  "
-             f"({r['native_mean_mm']} -> {r['regrid_mean_mm']} mm)  {r['flag']}")
+              f"({r['native_mean_mm']} -> {r['regrid_mean_mm']} mm)  {r['flag']}")
     if len(flagged) > 10:
         print(f"  ... and {len(flagged) - 10} more in the CSV")

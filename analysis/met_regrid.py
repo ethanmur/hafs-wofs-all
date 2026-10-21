@@ -1,6 +1,5 @@
 """Regrid observed precipitation onto a target grid with MET regrid_data_plane."""
 
-import glob
 import shlex
 import shutil
 import subprocess
@@ -18,7 +17,7 @@ R_EARTH_KM = 6371.0
 MET_MISSING = -9999.0
 SETTINGS_FILE = "regrid_settings.txt"
 OUTPUT_NAME = "precip"
-SOURCES = ("mrms", "stage4", "aorc")
+SOURCES = ("mrms", "stage4")
 # Dry hours make percent differences explode from tiny absolute errors.
 ABS_FLOOR_MM = 0.01
 
@@ -28,76 +27,28 @@ _CENSOR = " censor_thresh=[ <0 ]; censor_val=[ -9999 ];"
 DEFAULT_FIELDS = {
     "mrms": 'name="MultiSensor_QPE_01H_Pass2"; level="Z0";' + _CENSOR,
     "stage4": 'name="APCP"; level="A1";' + _CENSOR,
-    "aorc": 'name="APCP"; level="A1";' + _CENSOR,
 }
 
 
 @dataclass
 class RegridConfig:
+    """One deployment's regrid: the target grid, the method, and the cache."""
     cache_dir: Path
-    # Target grid, one of two ways. grid_spec is a MET grid-specification
-    # string (from a verification-grid JSON) and is the current path;
-    # grid_template is the older route -- any GRIB file whose grid is copied --
-    # kept so the obs-vs-obs YAMLs keep working.
-    grid_spec: Optional[str] = None
-    grid_template: Optional[str] = None
-    grid_name: str = "hafs_parent"
+    grid_spec: str          # MET grid-specification string, from the grid JSON
+    grid_name: str
     method: str = "BUDGET"
     width: int = 2
     vld_thresh: float = 0.5
     tolerance_pct: float = 2.0
     met_bin_dir: Optional[Path] = None
     fields: dict = field(default_factory=dict)
-    sources: tuple = ()      # empty = just the case's truth_source
 
     def field_spec(self, source):
         return self.fields.get(source, DEFAULT_FIELDS[source])
 
     def output_path(self, source, valid_dt):
-        # Flat: one directory per case, the source named in the filename.
+        # Flat: one directory per grid, the source named in the filename.
         return self.cache_dir / f"{source}_{valid_dt:%Y%m%d%H}.nc"
-
-
-def regrid_config_from_dict(cfg):
-    """RegridConfig from a YAML `regrid:` block, or None when absent."""
-    if not cfg:
-        return None
-    if "cache_dir" not in cfg:
-        raise KeyError("'regrid.cache_dir' is required")
-    grid_spec = cfg.get("grid_spec")
-    grid_name = cfg.get("grid_name")
-    if cfg.get("grid_json"):
-        if grid_spec:
-            raise KeyError("give either regrid.grid_json or regrid.grid_spec")
-        grid_spec, json_name = read_grid_json(cfg["grid_json"])
-        grid_name = grid_name or json_name
-    if not grid_spec and not cfg.get("grid_template"):
-        raise KeyError("one of 'regrid.grid_json', 'regrid.grid_spec' or "
-                       "'regrid.grid_template' is required")
-    sources = [str(v).lower() for v in (cfg.get("sources") or [])]
-    bad = sorted(set(sources) - set(SOURCES))
-    if bad:
-        raise KeyError(f"regrid.sources has unknown source(s) {bad}; "
-                       f"expected any of {SOURCES}")
-    fields = dict(cfg.get("fields") or {})
-    unknown = sorted(set(fields) - set(SOURCES))
-    if unknown:
-        raise KeyError(f"regrid.fields has unknown source(s) {unknown}; "
-                       f"expected any of {SOURCES}")
-    return RegridConfig(
-        grid_template=(str(cfg["grid_template"])
-                       if cfg.get("grid_template") else None),
-        grid_spec=str(grid_spec) if grid_spec else None,
-        cache_dir=Path(cfg["cache_dir"]),
-        grid_name=str(grid_name or "hafs_parent"),
-        method=str(cfg.get("method", "BUDGET")).upper(),
-        width=int(cfg.get("width", 2)),
-        vld_thresh=float(cfg.get("vld_thresh", 0.5)),
-        tolerance_pct=float(cfg.get("tolerance_pct", 2.0)),
-        met_bin_dir=Path(cfg["met_bin_dir"]) if cfg.get("met_bin_dir") else None,
-        fields=fields,
-        sources=tuple(sources),
-    )
 
 
 # =============================================================================
@@ -274,29 +225,23 @@ def _ensure_hemisphere(spec):
 def resolve_to_grid(config):
     """(-to_grid argument, human-readable description) for regrid_data_plane.
 
-    MET takes either a grid-specification string or a file to copy a grid
-    from, so a verification grid needs no template file cut from a GRIB.
+    MET takes the grid-specification string directly, so a verification grid
+    needs no template file cut from a GRIB.
     """
-    if config.grid_spec:
-        check_cache_settings(config)   # ensure_grid_template does this itself
-        return config.grid_spec, config.grid_spec
-    grid_file = ensure_grid_template(config)
-    source = (config.cache_dir / "grid_template_source.txt")
-    return str(grid_file), (source.read_text().strip() if source.exists()
-                            else str(grid_file))
+    check_cache_settings(config)
+    return config.grid_spec, config.grid_spec
 
 
 def check_cache_settings(config):
     """Refuse to mix two different regrids in one cache_dir.
 
-    Output used to sit in a <grid_name>_<method> subdirectory, so this was
-    impossible by construction; the settings are recorded in the cache
-    itself now that cache_dir is a single storm's folder.
+    The settings are recorded in the cache itself, so a changed grid, method or
+    width cannot quietly reuse output regridded the old way.
     """
     path = config.cache_dir / SETTINGS_FILE
     want = (f"grid_name={config.grid_name}\nmethod={config.method}\n"
             f"width={config.width}\nvld_thresh={config.vld_thresh}\n"
-            f"grid_spec={config.grid_spec or config.grid_template}\n")
+            f"grid_spec={config.grid_spec}\n")
     if path.exists():
         have = path.read_text()
         if have != want:
@@ -304,39 +249,11 @@ def check_cache_settings(config):
                 f"{config.cache_dir} already holds output regridded with "
                 f"different settings:\n  on disk:    "
                 f"{' '.join(have.split())}\n  configured: "
-                f"{' '.join(want.split())}\nPoint regrid.cache_dir at a new "
+                f"{' '.join(want.split())}\nPoint regrid_cache_dir at a new "
                 "directory, or delete the output already in this one.")
         return
     config.cache_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(want)
-
-
-def ensure_grid_template(config):
-    """Single-message copy of the template's grid, cut once and reused."""
-    check_cache_settings(config)
-    if not config.grid_template:
-        raise ValueError("regrid.grid_template is not set")
-    small = config.cache_dir / "grid_template.grb2"
-    if small.exists():
-        return small
-    hits = sorted(glob.glob(config.grid_template, recursive=True))
-    if not hits:
-        raise FileNotFoundError(
-            f"regrid.grid_template matched no files: {config.grid_template}")
-    src = Path(hits[0])
-    # MET only needs the grid; re-reading a multi-GB, hundreds-of-records
-    # parent.atm file on every call would dominate the runtime.
-    with open(src, "rb") as fh:
-        gid = eccodes.codes_grib_new_from_file(fh)
-    if gid is None:
-        raise ValueError(f"{src} contains no GRIB messages")
-    try:
-        msg = eccodes.codes_get_message(gid)
-    finally:
-        eccodes.codes_release(gid)
-    write_bytes(small, msg)
-    (config.cache_dir / "grid_template_source.txt").write_text(f"{src}\n")
-    return small
 
 
 # =============================================================================
@@ -408,70 +325,6 @@ def extract_accumulation(paths, valid_end, hours):
                 best = (npts, eccodes.codes_get_message(gid))
     return None if best is None else best[1]
 
-
-def _microdegrees(axis, name):
-    """(first, increment) of a regular ascending axis in whole microdegrees."""
-    axis = np.asarray(axis, dtype=float)
-    first = int(round(axis[0] * 1e6))
-    inc = int(round((axis[-1] - axis[0]) * 1e6 / (axis.size - 1)))
-    rebuilt = (first + inc * np.arange(axis.size)) / 1e6
-    # GRIB2 places a regular grid as first point + a fixed whole-microdegree
-    # increment; any other axis would be silently misplaced.
-    if inc <= 0 or np.abs(rebuilt - axis).max() > 5e-7:
-        raise ValueError(f"{name} is not a regular ascending axis in whole "
-                         "microdegrees, so GRIB2 can't represent it exactly")
-    return first, inc
-
-
-def write_accum_grib2(lat1d, lon1d, data, valid_end, hours, out_path):
-    """Regular lat/lon APCP accumulation as GRIB2, encoded like Stage IV."""
-    lat1d = np.asarray(lat1d, dtype=float)
-    lon1d = _wrap_lon(lon1d)
-    lat0, dlat = _microdegrees(lat1d, "latitude")
-    lon0, dlon = _microdegrees(lon1d, "longitude")
-    nj, ni = lat1d.size, lon1d.size
-    values = np.asarray(data, dtype=float).reshape(nj, ni)
-    ref = valid_end - timedelta(hours=hours)
-    gid = eccodes.codes_grib_new_from_samples("GRIB2")
-    try:
-        for key, val in [
-                ("centre", 7), ("discipline", 0),
-                ("jScansPositively", 1), ("iScansNegatively", 0),
-                ("Ni", ni), ("Nj", nj),
-                ("latitudeOfFirstGridPoint", lat0),
-                ("longitudeOfFirstGridPoint", lon0 % 360_000_000),
-                ("latitudeOfLastGridPoint", lat0 + dlat * (nj - 1)),
-                ("longitudeOfLastGridPoint", (lon0 + dlon * (ni - 1)) % 360_000_000),
-                ("iDirectionIncrement", dlon), ("jDirectionIncrement", dlat),
-                ("productDefinitionTemplateNumber", 8),
-                ("parameterCategory", 1), ("parameterNumber", 8),
-                ("typeOfFirstFixedSurface", 1),
-                ("dataDate", int(f"{ref:%Y%m%d}")),
-                ("dataTime", int(f"{ref:%H%M}")),
-                ("indicatorOfUnitOfTimeRange", 1), ("forecastTime", 0),
-                ("typeOfStatisticalProcessing", 1), ("typeOfTimeIncrement", 2),
-                ("indicatorOfUnitForTimeRange", 1), ("lengthOfTimeRange", hours),
-                # Last: the step/length setters rewrite end-of-interval keys.
-                ("yearOfEndOfOverallTimeInterval", valid_end.year),
-                ("monthOfEndOfOverallTimeInterval", valid_end.month),
-                ("dayOfEndOfOverallTimeInterval", valid_end.day),
-                ("hourOfEndOfOverallTimeInterval", valid_end.hour),
-                ("minuteOfEndOfOverallTimeInterval", valid_end.minute),
-                ("secondOfEndOfOverallTimeInterval", 0),
-                ("bitsPerValue", 24), ("bitmapPresent", 1),
-                ("missingValue", 9999)]:
-            eccodes.codes_set(gid, key, val)
-        eccodes.codes_set_values(
-            gid, np.where(np.isfinite(values), values, 9999.0).ravel())
-        msg = eccodes.codes_get_message(gid)
-    finally:
-        eccodes.codes_release(gid)
-    return write_bytes(out_path, msg)
-
-
-# =============================================================================
-# Reading native and regridded fields
-# =============================================================================
 
 def _wrap_lon(lon):
     return (np.asarray(lon, dtype=float) + 180.0) % 360.0 - 180.0

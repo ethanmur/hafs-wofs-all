@@ -19,10 +19,14 @@ TRUTH_SOURCES = ("stage4", "mrms")
 TOP_KEYS = {"storm_name", "storm_id", "deployment", "best_track",
             "truth_source", "wofs", "valid_start", "valid_end", "hafs",
             "out_dir", "mrms_cache_dir", "stage4_cache_dir", "grid",
-            "log_dir"}
+            "log_dir", "regrid_cache_dir", "regrid", "regrid_plots"}
 WOFS_KEYS = {"root", "available", "complete_windows"}
 HAFS_KEYS = {"lookback_h", "min_members", "init_start", "init_end", "models"}
 GRID_KEYS = {"res_km"}
+REGRID_KEYS = {"sources", "method", "width", "vld_thresh", "tolerance_pct",
+               "met_bin_dir", "fields"}
+PLOT_KEYS = {"out_dir", "panels"}
+PLOT_PANELS = ("compare-regrid", "compare-products", "compare-anomaly")
 
 
 def parse_stamp(value, key):
@@ -37,6 +41,18 @@ def _unknown(block, allowed, where):
     extra = set(block) - allowed
     if extra:
         raise ValueError(f"unknown {where} keys: {', '.join(sorted(extra))}")
+
+
+@dataclass
+class RegridSettings:
+    """How regrid-obs runs MET. `sources` empty means just the truth product."""
+    sources: tuple = ()
+    method: str = "BUDGET"
+    width: int = 2
+    vld_thresh: float = 0.5
+    tolerance_pct: float = 2.0
+    met_bin_dir: Optional[Path] = None
+    fields: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -62,6 +78,27 @@ class DeploymentCase:
     hafs_models: dict = field(default_factory=dict)
     res_km: float = DEFAULT_RES_KM
     log_dir: Optional[Path] = None
+    regrid_cache_dir: Optional[Path] = None
+    regrid: RegridSettings = field(default_factory=RegridSettings)
+    regrid_plot_dir: Optional[Path] = None
+    regrid_panels: tuple = ()               # empty = every panel
+
+    @property
+    def output_slug(self):
+        """Names the per-window outputs, so two windows never overwrite."""
+        return (f"{self.case_slug}_{self.valid_start:%Y%m%d%H}_"
+                f"{self.valid_end:%Y%m%d%H}")
+
+    @property
+    def grid_json_path(self):
+        """Where build-grid writes this deployment's grid."""
+        return self.out_dir / f"{self.case_slug}_grid.json"
+
+    @property
+    def regrid_sources(self):
+        """Obs products regrid-obs handles: the truth product unless
+        regrid.sources names more (e.g. both, for the MRMS sensitivity)."""
+        return self.regrid.sources or (self.truth_source,)
 
     @property
     def wofs_storm_folder(self):
@@ -93,6 +130,20 @@ def from_yaml(path):
     _unknown(hafs, HAFS_KEYS, "hafs")
     grid = cfg.get("grid") or {}
     _unknown(grid, GRID_KEYS, "grid")
+    regrid = cfg.get("regrid") or {}
+    _unknown(regrid, REGRID_KEYS, "regrid")
+    plots = cfg.get("regrid_plots") or {}
+    _unknown(plots, PLOT_KEYS, "regrid_plots")
+    panels = tuple(str(v) for v in (plots.get("panels") or ()))
+    bad = [k for k in panels if k not in PLOT_PANELS]
+    if bad:
+        raise ValueError(f"regrid_plots.panels has unknown panel(s) {bad}; "
+                         f"expected any of {PLOT_PANELS}")
+    sources = tuple(str(v).lower() for v in (regrid.get("sources") or ()))
+    bad = [v for v in sources if v not in TRUTH_SOURCES]
+    if bad:
+        raise ValueError(f"regrid.sources has unknown source(s) {bad}; "
+                         f"expected any of {TRUTH_SOURCES}")
 
     case = DeploymentCase(
         case_slug=path.stem,
@@ -109,7 +160,27 @@ def from_yaml(path):
         stage4_cache_dir=Path(cfg["stage4_cache_dir"]),
         res_km=float(grid.get("res_km", DEFAULT_RES_KM)),
         log_dir=Path(cfg["log_dir"]) if cfg.get("log_dir") else None,
+        regrid_cache_dir=(Path(cfg["regrid_cache_dir"])
+                          if cfg.get("regrid_cache_dir") else None),
+        regrid=RegridSettings(
+            sources=sources,
+            method=str(regrid.get("method", "BUDGET")).upper(),
+            width=int(regrid.get("width", 2)),
+            vld_thresh=float(regrid.get("vld_thresh", 0.5)),
+            tolerance_pct=float(regrid.get("tolerance_pct", 2.0)),
+            met_bin_dir=(Path(regrid["met_bin_dir"])
+                         if regrid.get("met_bin_dir") else None),
+            fields=dict(regrid.get("fields") or {})),
+        regrid_plot_dir=(Path(plots["out_dir"]) if plots.get("out_dir")
+                         else Path(cfg["out_dir"]) / "regrid"),
+        regrid_panels=panels,
     )
+    if case.regrid_cache_dir is None:
+        case.regrid_cache_dir = case.out_dir / "regrid_cache"
+    unknown_fields = set(case.regrid.fields) - set(TRUTH_SOURCES)
+    if unknown_fields:
+        raise ValueError(f"regrid.fields has unknown source(s) "
+                         f"{sorted(unknown_fields)}")
     if case.res_km <= 0:
         raise ValueError("grid.res_km must be positive")
 

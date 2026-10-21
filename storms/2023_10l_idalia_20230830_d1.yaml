@@ -19,5 +19,6 @@ wofs:
 # deployment still shows up in every later table.
 
 out_dir:          /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/output/idalia-2023-10l/20230830_d1/
+regrid_cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/regrid_obs/idalia-2023-10l/20230830_d1/
 mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms/
 stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv/

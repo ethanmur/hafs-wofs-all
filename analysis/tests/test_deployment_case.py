@@ -76,3 +76,30 @@ def test_available_case_needs_a_window_and_it_must_be_ordered(tmp_path):
 def test_grid_resolution_can_be_set(tmp_path):
     cfg = dict(_generated(GOOD), grid={"res_km": 3.0})
     assert dc.from_yaml(_write(tmp_path, cfg)).res_km == 3.0
+
+
+def test_regrid_defaults_to_the_truth_product_and_derives_paths(tmp_path):
+    case = dc.from_yaml(_write(tmp_path, _generated(GOOD)))
+    assert case.regrid_sources == ("stage4",)
+    assert case.regrid.method == "BUDGET" and case.regrid.width == 2
+    assert case.regrid_cache_dir.name == "20240708_d1"
+    assert case.regrid_plot_dir == case.out_dir / "regrid"
+    assert case.grid_json_path.name == "2024_02l_beryl_20240708_d1_grid.json"
+    assert case.output_slug == "2024_02l_beryl_20240708_d1_2024070818_2024070821"
+
+
+def test_regrid_block_can_ask_for_both_products(tmp_path):
+    cfg = dict(_generated(GOOD),
+               regrid={"sources": ["stage4", "mrms"], "width": 3})
+    case = dc.from_yaml(_write(tmp_path, cfg))
+    assert case.regrid_sources == ("stage4", "mrms") and case.regrid.width == 3
+
+
+def test_regrid_block_rejects_unknown_keys_and_sources(tmp_path):
+    cfg = _generated(GOOD)
+    with pytest.raises(ValueError):
+        dc.from_yaml(_write(tmp_path, dict(cfg, regrid={"sources": ["aorc"]})))
+    with pytest.raises(ValueError):
+        dc.from_yaml(_write(tmp_path, dict(cfg, regrid={"grid_template": "x"})))
+    with pytest.raises(ValueError):
+        dc.from_yaml(_write(tmp_path, dict(cfg, regrid_plots={"panels": ["x"]})))

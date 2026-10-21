@@ -65,8 +65,10 @@ def grib2_message(ni=6, nj=4, lat0=25.0, lon0=270.0, step=0.5, values=None,
 
 
 def _config(tmp, **overrides):
-    kwargs = dict(grid_template=str(Path(tmp) / "*.grb2"),
-                  cache_dir=Path(tmp) / "cache")
+    kwargs = dict(cache_dir=Path(tmp) / "cache",
+                  grid_spec="lambert 150 150 29.0 -86.8 -82.25 6.0 6371.2 "
+                            "30.0 60.0 N",
+                  grid_name="beryl")
     kwargs.update(overrides)
     return met_regrid.RegridConfig(**kwargs)
 
@@ -258,63 +260,9 @@ def test_read_grib_message_masks_bitmap_and_negatives():
     assert np.isclose(lon[0, 0], -90.0)          # 270E wrapped to -90
 
 
-def test_ensure_grid_template_copies_first_message_once():
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "run" / "x.2024092400.parent.atm.f006.grb2"
-        src.parent.mkdir()
-        src.write_bytes(grib2_message(ni=6, nj=4) + grib2_message(ni=3, nj=2))
-        cfg = _config(tmp, grid_template=str(Path(tmp) / "**" / "*parent.atm.f*.grb2"))
-        small = met_regrid.ensure_grid_template(cfg)
-        assert sum(1 for _ in met_regrid._grib_messages(small)) == 1
-        _, _, vals = met_regrid.read_grib_field(small, want_latlon=False)
-        assert vals.shape == (4, 6)
-        assert str(src) in (cfg.cache_dir / "grid_template_source.txt").read_text()
-        src.unlink()
-        assert met_regrid.ensure_grid_template(cfg) == small   # no re-read
-
-
 # ----------------------------------------------------------------------------
 # NetCDF in and out
 # ----------------------------------------------------------------------------
-
-def test_write_accum_grib2_roundtrip_is_exact_on_aorc_grid():
-    t = datetime(2024, 9, 24, 2)
-    # AORC's real axes: 0.008333 deg from 20N / 130W (not 1/120 deg).
-    lat1d = 20.0 + 0.008333 * np.arange(2400, 2410)
-    lon1d = -130.0 + 0.008333 * np.arange(3601, 3616)
-    data = np.random.default_rng(3).gamma(0.8, 3.0, (lat1d.size, lon1d.size))
-    data[0, 0] = np.nan
-    with tempfile.TemporaryDirectory() as tmp:
-        path = met_regrid.write_accum_grib2(lat1d, lon1d, data, t, 1,
-                                            Path(tmp) / "aorc.grb2")
-        lat, lon, vals = met_regrid.read_grib_field(path)
-        assert np.abs(lat[:, 0] - lat1d).max() < 1e-9
-        assert np.abs(lon[0] - lon1d).max() < 1e-9
-        assert np.isnan(vals[0, 0])
-        ok = np.isfinite(data)
-        assert np.abs(vals[ok] - data[ok]).max() < 1e-4
-        # Same identity MET matches Stage IV by: a 1h APCP ending at t.
-        assert met_regrid.extract_accumulation([path], t, hours=1) is not None
-        gid = eccodes.codes_new_from_message(path.read_bytes())
-        try:
-            assert [eccodes.codes_get(gid, k) for k in
-                    ("discipline", "parameterCategory", "parameterNumber")] == [0, 1, 8]
-        finally:
-            eccodes.codes_release(gid)
-
-
-def test_write_accum_grib2_refuses_grids_it_cannot_place_exactly():
-    t = datetime(2024, 9, 24, 2)
-    lon1d = -90.0 + 0.5 * np.arange(4)
-    for lat1d in (20.0 + np.arange(500) / 120.0,       # 1/120: not whole udeg
-                  np.array([22.0, 21.0, 20.0])):       # descending
-        try:
-            met_regrid.write_accum_grib2(lat1d, lon1d,
-                                         np.zeros((lat1d.size, 4)), t, 1,
-                                         Path("/nonexistent/x.grb2"))
-            assert False, "expected ValueError"
-        except ValueError as e:
-            assert "latitude" in str(e)
 
 
 def test_read_regridded_opens_met_style_layout():
@@ -425,26 +373,43 @@ def test_met_tool_prefers_bin_dir():
 # Config
 # ----------------------------------------------------------------------------
 
+
+# ----------------------------------------------------------------------------
+# Config
+# ----------------------------------------------------------------------------
+
 def test_regrid_config_defaults_and_cache_layout():
-    assert met_regrid.regrid_config_from_dict(None) is None
-    cfg = met_regrid.regrid_config_from_dict(
-        {"grid_template": "/x/*.grb2", "cache_dir": "/c", "method": "budget",
-         "fields": {"mrms": 'name="X"; level="Z0";'}})
+    cfg = _config("/c", cache_dir=Path("/c"),
+                  fields={"mrms": 'name="X"; level="Z0";'})
     assert cfg.method == "BUDGET" and cfg.width == 2 and cfg.vld_thresh == 0.5
-    # flat layout: one directory per case, source named in the file
+    # flat layout: one directory per grid, source named in the file
     assert cfg.output_path("stage4", datetime(2024, 9, 24, 2)) == Path(
         "/c/stage4_2024092402.nc")
     assert cfg.field_spec("mrms") == 'name="X"; level="Z0";'
-    assert cfg.field_spec("aorc") == met_regrid.DEFAULT_FIELDS["aorc"]
+    assert cfg.field_spec("stage4") == met_regrid.DEFAULT_FIELDS["stage4"]
 
 
-def test_regrid_config_rejects_unknown_field_source():
-    try:
-        met_regrid.regrid_config_from_dict(
-            {"grid_template": "x", "cache_dir": "c", "fields": {"st4": "..."}})
-        assert False, "expected KeyError"
-    except KeyError as e:
-        assert "st4" in str(e)
+def test_only_mrms_and_stage_iv_are_sources():
+    assert met_regrid.SOURCES == ("mrms", "stage4")
+    assert set(met_regrid.DEFAULT_FIELDS) == {"mrms", "stage4"}
+
+
+def test_resolve_to_grid_hands_met_the_spec_string_directly():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _config(tmp)
+        arg, desc = met_regrid.resolve_to_grid(cfg)
+        assert arg == cfg.grid_spec == desc
+
+
+def test_cache_settings_reject_a_different_grid():
+    with tempfile.TemporaryDirectory() as tmp:
+        met_regrid.check_cache_settings(_config(tmp))
+        try:
+            met_regrid.check_cache_settings(
+                _config(tmp, grid_spec="lambert 999 999 b"))
+        except ValueError:
+            return
+        raise AssertionError("expected ValueError for a changed grid")
 
 
 class _FakeMonkeypatch:
@@ -460,61 +425,6 @@ class _FakeMonkeypatch:
     def undo(self):
         for obj, name, value in reversed(self._saved):
             setattr(obj, name, value)
-
-
-def test_regrid_config_from_grid_json():
-    import json
-    with tempfile.TemporaryDirectory() as tmp:
-        grid = Path(tmp) / "case_grid.json"
-        grid.write_text(json.dumps({
-            "name": "lambert6km",
-            "met_spec": "lambert 463 513 18.78 106.46 93.05 6.0 6371.2 "
-                        "24.15 42.55"}))
-        cfg = met_regrid.regrid_config_from_dict(
-            {"grid_json": str(grid), "cache_dir": "/c"})
-        assert cfg.grid_spec.startswith("lambert 463 513")
-        assert cfg.grid_name == "lambert6km"
-        assert cfg.grid_template is None
-        # MET takes the spec string directly; no template needs cutting
-        arg, _ = met_regrid.resolve_to_grid(
-            met_regrid.regrid_config_from_dict(
-                {"grid_json": str(grid), "cache_dir": tmp}))
-        assert arg == cfg.grid_spec
-
-
-def test_regrid_config_needs_a_target_grid():
-    try:
-        met_regrid.regrid_config_from_dict({"cache_dir": "/c"})
-    except KeyError as err:
-        assert "grid_json" in str(err)
-        return
-    raise AssertionError("expected KeyError")
-
-
-def test_regrid_config_sources_override():
-    cfg = met_regrid.regrid_config_from_dict(
-        {"grid_spec": "lambert ...", "cache_dir": "/c",
-         "sources": ["stage4", "MRMS"]})
-    assert cfg.sources == ("stage4", "mrms")
-    try:
-        met_regrid.regrid_config_from_dict(
-            {"grid_spec": "x", "cache_dir": "/c", "sources": ["st4"]})
-    except KeyError:
-        return
-    raise AssertionError("expected KeyError")
-
-
-def test_cache_settings_reject_a_different_grid():
-    with tempfile.TemporaryDirectory() as tmp:
-        base = {"cache_dir": tmp, "grid_spec": "lambert 463 513 a"}
-        met_regrid.check_cache_settings(
-            met_regrid.regrid_config_from_dict(base))
-        try:
-            met_regrid.check_cache_settings(met_regrid.regrid_config_from_dict(
-                {**base, "grid_spec": "lambert 999 999 b"}))
-        except ValueError:
-            return
-        raise AssertionError("expected ValueError for a changed grid")
 
 
 def _run_all():

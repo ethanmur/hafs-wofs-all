@@ -83,9 +83,8 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   code.
 - Stage IV coverage over the mountain West (Hilary's three California and
   Nevada domains) is verified by hand; `truth_source: mrms` is the fallback.
-- Whether AORC and the obs-vs-obs comparison plots stay. AORC is no longer a
-  truth candidate; B3 and H1 decide whether the comparison tooling survives as
-  QC or is deleted.
+- Whether `stats-regrid`'s MRMS-vs-Stage IV comparison earns its place once
+  the MRMS sensitivity check is run; H1 decides. (AORC was removed in B0.)
 - Which WoFS members to verify and how to label them (Phase D1).
 
 ### Deferred
@@ -314,44 +313,68 @@ the resolution statement.
 
 ## Phase B — Observations on the deployment grid
 
-### B0. Delete: AORC and per-case regrid paths (pending open item)
-Remove the pieces the new truth model does not use: AORC as a regrid
-candidate, `regrid.grid_template` pointing at the HAFS parent, and any default
-that assumes one grid per storm. Delete `aorc_common.py` and its tests if the
-decision on AORC is to drop it.
+### B0. Delete: AORC and the per-case regrid paths
+AORC is no longer a truth candidate, and every regrid now targets a
+deployment's own grid, so the pieces built for one grid per storm go:
+`aorc_common.py` and its tests, AORC in `download-obs`, `regrid-obs` and the
+plots, the `regrid.grid_template` route that copied a HAFS parent grid, and the
+old per-storm case loader in `obs_cases.py` (`ObsCase`, `from_yaml`, the
+`skip_*` flags). The AORC-based land mask and the "anomaly against AORC" panel
+go with it; anomalies are now against the case's `truth_source`.
 
-*Check:* `download-obs` and `regrid-obs` run for `stage4` and `mrms` only;
-tests pass.
+*Check:* `download-obs` and `regrid-obs` handle `stage4` and `mrms` only; no
+module imports `aorc_common`; tests pass.
 
-### B1. Repoint and clear the cache
-Add the grid identity to the regridded cache path
-(`<deployment>/<grid_name>_<res>km/`). Delete old regridded obs; **keep the
-native downloads**. MRMS re-download is the expensive part and the files are
-grid-independent.
+### B1. Cache layout
+Regridded obs live under `<regrid_cache_dir>/<res>km/`, one directory per
+deployment and resolution (`.../data/regrid_obs/<storm>/<deployment>/6km/`),
+files named `<source>_<YYYYMMDDHH>.nc`. The directory records its grid spec,
+method and width in `regrid_settings.txt`, and a different grid or setting
+refuses to reuse it, so a rebuilt grid cannot quietly mix with old output.
+**Native downloads are never touched:** the MRMS re-download is the expensive
+part and those files are grid-independent.
 
 ### B2. Regrid the truth product to the deployment grid
 
-    python analysis/run.py <deployment>.yaml regrid-obs
+    python analysis/run.py storms/<case>.yaml regrid-obs
 
-`truth_source` defaults to `stage4`; `regrid.sources: [stage4, mrms]`
-regrids both for the sensitivity check. Every command tees its console output
+`truth_source` defaults to `stage4`; `regrid.sources: [stage4, mrms]` in the
+case YAML regrids both, for the MRMS sensitivity check. Needs `build-grid` to
+have run (it reads `<case>_grid.json`) and `module load met`. Every hour in
+`(valid_start, valid_end]` is regridded; the obs files are stamped at the end
+of the hour, so the window (15Z, 18Z] is the 16Z, 17Z and 18Z files. The output
+shape is checked against the grid JSON. Every command tees its console output
 to `<out_dir>/logs/<case>_<command>_<stamp>.log` (override with `log_dir:`),
 flushed on every write, so a killed job still leaves a usable record.
 
-*Check:* per-hour conservation CSV — domain-mean percent difference within a
+`download-obs` fetches MRMS for the configured sources only. Stage IV hourly
+data is not downloaded by this repo: place the `ST4.<day>` files under
+`stage4_cache_dir` yourself.
+
+A deployment with `wofs.available: false` is skipped with a message.
+
+*Check:* the per-hour conservation CSV: domain-mean percent difference within a
 few tenths of a percent.
 
 *MET:* `regrid_data_plane` (BUDGET, width 2, `vld_thresh 0.5`).
 
 ### B3. Visual QC of the regridded obs
-Run `plot-regrid` on the regridded truth. If a second product was regridded,
-the product-vs-product map comes with it. Distribution and 1:1 comparisons
-stay only if the AORC/obs-vs-obs decision keeps them.
+`plot-regrid`: native vs regridded for each product, hour by hour, framed on
+the deployment grid with its outline; with both products regridded, also the
+two side by side and the anomaly against the truth product. `stats-regrid`
+(distributions and a cell-by-cell 1:1 plot) needs both products and is the
+MRMS sensitivity diagnostic; it carries a variant restricted to the
+observation-validity region once C1 exists.
 
-*Check:* native-vs-regridded pairs look right; distributions have not shifted
-in a way 6 km smoothing cannot explain.
+*Check:* native-vs-regridded pairs look right; where both products are
+regridded, distributions have not shifted in a way 6 km smoothing cannot
+explain.
 
 *MET:* `plot_data_plane` for a quick raster check on a single NetCDF.
+
+*Pending:* `build-masks`, `plot-masked`, `list-windows`, `regrid-hafs` and
+`plot-hafs` are not available until phases C and D rebuild them on the
+per-deployment case; their modules stay on disk meanwhile.
 
 ---
 
@@ -685,8 +708,7 @@ Colorblind-safe palettes throughout (Okabe-Ito; no red/green pairings).
 
 ### H1. Delete: dead code and configs
 Run a dead-code pass (unused functions, unused config keys, unused imports) and
-remove what it finds. Re-decide the obs-vs-obs tooling (`obs_regrid_plots`,
-`obs_regrid_stats`) and `aorc_common` against what the finished pipeline uses.
+remove what it finds. Re-decide `obs_regrid_stats` against what the finished pipeline uses.
 
 ### H2. Prune the environment and job scripts
 Remove dependencies only the deleted code needed from `environment.yml` and

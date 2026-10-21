@@ -12,7 +12,6 @@ what the old best-track grid builder read. It stays only while obs_cases.py
 and masks.py still import it, and goes with them in plan steps B0 and C0.
 """
 
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional

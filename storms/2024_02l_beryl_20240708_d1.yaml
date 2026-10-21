@@ -30,5 +30,6 @@ hafs:
     HFSB: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs/2024-02l/HFSB
 
 out_dir:          /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/output/beryl-2024-02l/20240708_d1/
+regrid_cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/regrid_obs/beryl-2024-02l/20240708_d1/
 mrms_cache_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms/
 stage4_cache_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv/

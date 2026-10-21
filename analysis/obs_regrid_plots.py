@@ -1,14 +1,15 @@
 """Maps of the MET-regridded obs written by regrid-obs (plot-regrid).
 
-For every hour in the case window, into case.regrid_plot_dir:
-  <source>_{full,zoom}_<YYYYMMDDHH>.png
-      native vs regridded, 1x2, full domain and case.zoom_domain; written
+For every hour in the scored period, into case.regrid_plot_dir:
+  <source>_full_<YYYYMMDDHH>.png
+      native vs regridded, 1x2, framed on the deployment grid; written
       straight into regrid_plot_dir, since this is the usual single-product
       check and a subfolder of one thing is noise
   compare-products/products_full_<YYYYMMDDHH>.png
-      MRMS | Stage IV | AORC, all on the regrid grid
+      MRMS | Stage IV on the regrid grid (needs both regridded)
   compare-anomaly/anomaly_full_<YYYYMMDDHH>.png
-      AORC | AORC - MRMS | AORC - Stage IV, AORC taken as truth
+      truth | truth - other product, the truth product being the case's
+      truth_source (needs both regridded)
 
 Reads the obs cache and the regrid cache only; run regrid-obs first.
 
@@ -19,7 +20,6 @@ Usage:
 import csv
 import math
 import time
-from pathlib import Path
 from datetime import timedelta
 
 import numpy as np
@@ -38,8 +38,7 @@ import met_regrid
 import verification_grid as vg
 import obs_cases as oc
 
-LABELS = {"mrms": "MRMS", "stage4": "Stage IV", "aorc": "AORC"}
-TRUTH = "aorc"
+LABELS = {"mrms": "MRMS", "stage4": "Stage IV"}
 NODATA_COLOR = "#d0d0d0"
 # Fixed across hours so a sequence of anomaly maps is directly comparable.
 DIFF_LEVELS_IN = np.array([-2, -1, -0.5, -0.25, -0.1, -0.05, -0.01,
@@ -72,18 +71,17 @@ def _draw_track(ax, track_line):
 
 
 GRID_EDGE_COLOR = "#444444"
-WOFS_EDGE_COLOR = "#cc79a7"
 # Blank margin around the regrid grid, as a fraction of its latitude span,
 # so the domain outline is visible instead of running along the panel edge.
 DOMAIN_MARGIN_FRAC = 0.04
 DOMAIN_MARGIN_MIN_DEG = 1.5
 
 
-def grid_overlays(rlat, rlon, wofs_domains):
-    """Outline of the regrid grid plus each WoFS box, for _panel_frame."""
+def grid_overlays(rlat, rlon):
+    """Outline of the regrid grid, for _panel_frame. The grid is the WoFS
+    domain, so its outline is the domain boundary."""
     olat, olon = vg._grid_outline(rlat, rlon)
-    return {"outline": (olat, olon),
-            "wofs": [tuple(d.domain) for d in (wofs_domains or [])]}
+    return {"outline": (olat, olon)}
 
 
 def centred_domain(rlat, rlon):
@@ -100,7 +98,6 @@ def centred_domain(rlat, rlon):
 
 
 def _draw_overlays(ax, overlays):
-    from matplotlib.patches import Rectangle
     if not overlays:
         return
     olat, olon = overlays.get("outline", (None, None))
@@ -110,11 +107,6 @@ def _draw_overlays(ax, overlays):
     for lat, lon, arr, colour in overlays.get("contours", []):
         ax.contour(lon, lat, arr.astype(float), levels=[0.5], colors=[colour],
                    linewidths=1.4, transform=ccrs.PlateCarree(), zorder=6)
-    for lat0, lat1, lon0, lon1 in overlays.get("wofs", []):
-        ax.add_patch(Rectangle(
-            (lon0, lat0), lon1 - lon0, lat1 - lat0,
-            transform=ccrs.PlateCarree(), facecolor="none",
-            edgecolor=WOFS_EDGE_COLOR, lw=1.6, linestyle="--", zorder=8))
 
 
 def _panel_frame(ax, domain, track_line, title, overlays=None):
@@ -177,7 +169,7 @@ def _styles():
                      norm=mcolors.BoundaryNorm(DIFF_LEVELS_IN, diff.N,
                                                extend="both"),
                      ticks=DIFF_LEVELS_IN, extend="both", format="%g",
-                     label="AORC minus product (in); blue = AORC wetter"),
+                     label="Truth minus product (in); blue = truth wetter"),
     }
 
 
@@ -261,26 +253,18 @@ def map_figure(panels, domain, track_line, title, out_path,
 PANELS = ("compare-regrid", "compare-products", "compare-anomaly")
 
 
-def missing_regridded(case, sources, timestamps):
-    return [case.regrid.output_path(s, t) for t in timestamps for s in sources
-            if not case.regrid.output_path(s, t).exists()]
-
-
-def available_sources(case, timestamps, command):
+def available_sources(case, cfg, timestamps):
     """The configured products that actually have regridded output.
 
-    A product with no output at all is dropped with a note -- that is the
-    normal state when only the truth product has been regridded. One that is
-    *partly* there is an error, since silently plotting a subset of hours
-    would hide a failed regrid.
+    A product with no output at all is dropped with a note -- the normal state
+    when only the truth product has been regridded. One that is *partly*
+    there is an error, since silently plotting a subset of hours would hide a
+    failed regrid.
     """
-    sources = oc.regrid_sources(case)
-    if not sources:
-        return []
+    sources = list(case.regrid_sources)
     present, absent, partial = [], [], []
     for source in sources:
-        have = sum(case.regrid.output_path(source, t).exists()
-                   for t in timestamps)
+        have = sum(cfg.output_path(source, t).exists() for t in timestamps)
         if have == len(timestamps):
             present.append(source)
         elif have == 0:
@@ -288,8 +272,8 @@ def available_sources(case, timestamps, command):
         else:
             partial.append((source, have))
     if partial:
-        print(f"\nERROR: regridded output is incomplete -- run regrid-obs "
-              f"first:\n  python analysis/run.py <yaml> regrid-obs\n")
+        print("\nERROR: regridded output is incomplete -- run regrid-obs "
+              "first:\n  python analysis/run.py <yaml> regrid-obs\n")
         for source, have in partial:
             print(f"  {source}: {have} of {len(timestamps)} hours present")
         raise SystemExit(1)
@@ -297,8 +281,7 @@ def available_sources(case, timestamps, command):
         print(f"Not regridded, skipping: {', '.join(absent)}")
     if not present:
         print(f"\nERROR: no regridded output for {', '.join(sources)} -- run "
-              f"regrid-obs first:\n"
-              f"  python analysis/run.py <yaml> regrid-obs\n")
+              "regrid-obs first:\n  python analysis/run.py <yaml> regrid-obs\n")
         raise SystemExit(1)
     return present
 
@@ -327,56 +310,56 @@ def _cropped(lat, lon, data, cut):
 
 def plot_regrid(case):
     """Native-vs-regridded, product, and anomaly maps for every hour."""
-    cfg = case.regrid
-    if cfg is None:
-        raise SystemExit("ERROR: plot-regrid needs a `regrid:` block in the YAML")
+    if not case.wofs_available:
+        raise SystemExit(f"plot-regrid: {case.case_slug} has no complete WoFS "
+                         "window; nothing to plot.")
+    cfg = oc.regrid_config(case)
     timestamps = oc.hourly_timestamps(case.valid_start, case.valid_end)
-    sources = available_sources(case, timestamps, "plot-regrid")
+    sources = available_sources(case, cfg, timestamps)
     oc._print_case_header(case, "Plot regridded obs", sources)
     # The native field is needed for the native-vs-regridded panels, so only
     # the products actually being plotted have to be cached.
     oc._exit_if_cache_incomplete(case, "plot-regrid", sources)
 
-    panels = case.regrid_panels or PANELS
+    truth = case.truth_source
+    wanted = case.regrid_panels or PANELS
+    kinds = list(wanted)
     if len(sources) < 2:
         dropped = [k for k in ("compare-products", "compare-anomaly")
-                   if k in panels]
+                   if k in kinds]
         if dropped:
             print(f"Only {sources[0]} is regridded, so "
                   f"{' and '.join(dropped)} need a second product and are "
                   "skipped.")
-        panels = [k for k in panels if k not in dropped]
-    elif "compare-anomaly" in panels and TRUTH not in sources:
-        print(f"compare-anomaly uses {LABELS[TRUTH]} as truth and it is not "
+        kinds = [k for k in kinds if k not in dropped]
+    elif "compare-anomaly" in kinds and truth not in sources:
+        print(f"compare-anomaly uses {LABELS[truth]} as truth and it is not "
               "regridded -- skipped.")
-        panels = [k for k in panels if k != "compare-anomaly"]
-    print(f"Panels:       {', '.join(panels)}")
+        kinds = [k for k in kinds if k != "compare-anomaly"]
+    print(f"Panels:       {', '.join(kinds)}")
 
     # The regridded files carry the verification grid, so the plots can be
     # framed on it and outline it without re-reading the grid JSON.
     glat, glon, _ = met_regrid.read_regridded(
         cfg.output_path(sources[0], timestamps[0]))
-    overlays = grid_overlays(glat, glon, case.wofs_domains)
+    overlays = grid_overlays(glat, glon)
 
     out = case.regrid_plot_dir
     # compare-regrid is the common single-product case, so its maps go
     # straight into out_dir; the multi-product panels keep subfolders.
-    dirs = {k: (out if k == "compare-regrid" else out / k) for k in panels}
-    domains = {"full": centred_domain(glat, glon)}
-    if case.zoom_domain:
-        domains["zoom"] = case.zoom_domain
-    grid_desc = f"{cfg.grid_name} grid ({cfg.method})"
+    dirs = {k: (out if k == "compare-regrid" else out / k) for k in kinds}
+    domain = centred_domain(glat, glon)
+    grid_desc = f"{case.res_km:g} km deployment grid ({cfg.method})"
     print(f"Regrid cache: {cfg.cache_dir}")
     print(f"Output:       {out}")
-    print(f"Domains:      " + "  ".join(f"{k}={v}" for k, v in domains.items()),
-          flush=True)
+    print(f"Domain:       {domain}", flush=True)
 
     track = parse_bdeck(case.best_track)
     budget = load_budget(case)
     if not budget:
         print("No regrid-obs conservation CSV found; headers will omit it.")
     native_ll = {}   # source -> (lat2d, lon2d), constant across hours
-    cuts = {}        # (grid key, domain name) -> crop slices
+    cuts = {}        # grid key -> crop slices
     started = time.monotonic()
     for i, t in enumerate(timestamps, 1):
         track_line = track_segment(track, case.valid_start, t)
@@ -393,135 +376,50 @@ def plot_regrid(case):
                 cfg.output_path(source, t))
             regridded[source] = (rlat, rlon, rvals)
 
-            for dname, domain in domains.items():
-                max_cells = FULL_DOMAIN_MAX_CELLS if dname == "full" else None
-                for key, la, lo in ((source, lat, lon), ("regrid", rlat, rlon)):
-                    if (key, dname) not in cuts:
-                        cuts[key, dname] = crop_slices(la, lo, domain,
-                                                       max_cells)
-                if "compare-regrid" not in panels:
-                    continue
-                label = LABELS[source]
-                map_figure(
-                    [(f"{label} native",
-                      *_cropped(lat, lon, vals, cuts[source, dname]), "qpf"),
-                     (f"{label} regridded",
-                      *_cropped(rlat, rlon, rvals, cuts["regrid", dname]),
-                      "qpf")],
-                    domain, track_line,
-                    f"{label} 1-h precipitation, {valid}: native vs "
-                    f"{grid_desc}{_budget_note(budget, t, source)}",
-                    dirs["compare-regrid"] / f"{source}_{dname}_{stamp}.png",
-                    overlays=overlays)
+            for key, la, lo in ((source, lat, lon), ("regrid", rlat, rlon)):
+                if key not in cuts:
+                    cuts[key] = crop_slices(la, lo, domain,
+                                            FULL_DOMAIN_MAX_CELLS)
+            if "compare-regrid" not in kinds:
+                continue
+            label = LABELS[source]
+            map_figure(
+                [(f"{label} native",
+                  *_cropped(lat, lon, vals, cuts[source]), "qpf"),
+                 (f"{label} regridded",
+                  *_cropped(rlat, rlon, rvals, cuts["regrid"]), "qpf")],
+                domain, track_line,
+                f"{label} 1-h precipitation, {valid}: native vs "
+                f"{grid_desc}{_budget_note(budget, t, source)}",
+                dirs["compare-regrid"] / f"{source}_full_{stamp}.png",
+                overlays=overlays)
 
         rlat, rlon, _ = next(iter(regridded.values()))
-        cut = cuts["regrid", "full"]
-        if "compare-products" in panels:
+        cut = cuts["regrid"]
+        if "compare-products" in kinds:
             map_figure(
                 [(LABELS[s], *_cropped(*regridded[s], cut), "qpf")
                  for s in sources],
-                domains["full"], track_line,
+                domain, track_line,
                 f"Regridded 1-h precipitation on the {grid_desc}, {valid}",
                 dirs["compare-products"] / f"products_full_{stamp}.png",
                 overlays=overlays)
 
-        if "compare-anomaly" in panels and TRUTH in regridded:
-            truth = regridded[TRUTH][2]
-            panels = [(f"{LABELS[TRUTH]} (truth)",
-                       *_cropped(rlat, rlon, truth, cut), "qpf")]
+        if "compare-anomaly" in kinds and truth in regridded:
+            truth_field = regridded[truth][2]
+            anomaly = [(f"{LABELS[truth]} (truth)",
+                        *_cropped(rlat, rlon, truth_field, cut), "qpf")]
             for s in sources:
-                if s != TRUTH:
-                    panels.append((f"{LABELS[TRUTH]} - {LABELS[s]}",
-                                   *_cropped(rlat, rlon,
-                                             truth - regridded[s][2], cut),
-                                   "diff"))
-            map_figure(panels, domains["full"], track_line,
-                       f"1-h precipitation anomaly vs {LABELS[TRUTH]}, "
+                if s != truth:
+                    anomaly.append((f"{LABELS[truth]} - {LABELS[s]}",
+                                    *_cropped(rlat, rlon,
+                                              truth_field - regridded[s][2],
+                                              cut), "diff"))
+            map_figure(anomaly, domain, track_line,
+                       f"1-h precipitation anomaly vs {LABELS[truth]}, "
                        f"{grid_desc}, {valid}",
                        dirs["compare-anomaly"] / f"anomaly_full_{stamp}.png",
                        overlays=overlays)
         print(f"  [{i:>3}/{len(timestamps)}] {t:%Y-%m-%d %HZ}  plotted "
               f"(+{time.monotonic() - started:.0f}s)", flush=True)
     print(f"\nSaved maps under {out}")
-
-
-# =============================================================================
-# Masked obs (Phase C check)
-# =============================================================================
-
-def plot_masked(case):
-    """Regridded obs clipped to the Phase C intersection, hour by hour.
-
-    One panel per hour: the truth field with every cell outside
-    coastal_valid AND track_swath AND the live WoFS box blanked, with the
-    three region boundaries drawn over it. This is the field grid_stat will
-    actually accumulate counts from, so seeing it directly is the check that
-    the masks compose the way they are meant to.
-
-    The WoFS term is taken from the deployments live at each valid time, not
-    the all-hours union, so the clipped area moves with the deployment.
-    """
-    import masks as mask_lib
-    cfg = case.regrid
-    if cfg is None:
-        raise SystemExit("ERROR: plot-masked needs a `regrid:` block in the YAML")
-    timestamps = oc.hourly_timestamps(case.valid_start, case.valid_end)
-    sources = available_sources(case, timestamps, "plot-masked")
-    oc._print_case_header(case, "Plot masked obs", sources)
-
-    spec, regions, mlat, mlon, track_pts = mask_lib.case_regions(case)
-    glat, glon, _ = met_regrid.read_regridded(
-        cfg.output_path(sources[0], timestamps[0]))
-    if glat.shape != regions[mask_lib.VERIFY_NAME].shape:
-        raise SystemExit(
-            f"ERROR: the regridded obs are {glat.shape} but the masks are "
-            f"{regions[mask_lib.VERIFY_NAME].shape}. They must be on the same "
-            f"grid -- re-run build-grid, regrid-obs and build-masks for this "
-            f"case.")
-    overlays = grid_overlays(glat, glon, case.wofs_domains)
-    overlays["contours"] = [
-        (mlat, mlon, regions[n], mask_lib.REGION_COLORS[n])
-        for n in (mask_lib.MASK_NAME, mask_lib.SWATH_NAME,
-                  mask_lib.WOFS_ANY_NAME) if n in regions]
-
-    # The clipped maps are a Phase C product, so they go beside the mask
-    # files when masks.out_dir is set, not with the regrid check plots.
-    out = Path((case.masks and case.masks.out_dir) or case.regrid_plot_dir)
-    domains = {"full": centred_domain(glat, glon)}
-    if case.zoom_domain:
-        domains["zoom"] = case.zoom_domain
-    print(f"Regions:      " + ", ".join(
-        f"{n}={int(a.sum()):,}" for n, a in regions.items()))
-    print(f"Output:       {out}", flush=True)
-
-    track = parse_bdeck(case.best_track)
-    cuts = {}
-    started = time.monotonic()
-    for i, t in enumerate(timestamps, 1):
-        track_line = track_segment(track, case.valid_start, t)
-        mask, live = mask_lib.active_verify_mask(regions, case.wofs_domains, t)
-        note = (f"WoFS {', '.join(live)}" if live
-                else "no WoFS deployment live")
-        for source in sources:
-            rlat, rlon, rvals = met_regrid.read_regridded(
-                cfg.output_path(source, t))
-            clipped = np.where(mask, rvals, np.nan)
-            for dname, domain in domains.items():
-                if ("regrid", dname) not in cuts:
-                    cuts["regrid", dname] = crop_slices(
-                        rlat, rlon, domain,
-                        FULL_DOMAIN_MAX_CELLS if dname == "full" else None)
-                cut = cuts["regrid", dname]
-                map_figure(
-                    [(f"{LABELS[source]} clipped to {mask_lib.VERIFY_NAME} "
-                      f"({int(mask.sum()):,} cells)",
-                      *_cropped(rlat, rlon, clipped, cut), "qpf")],
-                    domain, track_line,
-                    f"{LABELS[source]} 1-h precipitation on the "
-                    f"{cfg.grid_name} grid, valid {t:%Y-%m-%d %HZ}, "
-                    f"masked to the verification region   |   {note}",
-                    out / f"{source}_masked_{dname}_{t:%Y%m%d%H}.png",
-                    overlays=overlays)
-        print(f"  [{i:>3}/{len(timestamps)}] {t:%Y-%m-%d %HZ}  {note}  "
-              f"(+{time.monotonic() - started:.0f}s)", flush=True)
-    print(f"\nSaved masked maps under {out}")
