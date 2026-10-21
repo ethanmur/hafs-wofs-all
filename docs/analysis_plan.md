@@ -51,6 +51,25 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   same windows. Individual runs first (one WoFS member against one HAFS cycle at
   the same valid window); probability-matched means and ensembles come after
   the individual-run pipeline is stable.
+- **Files live in flat `data/` and `figures/` folders, by kind.** Similar files
+  sit next to each other, not in per-case output trees, and file names carry the
+  case so deployments share a folder. There is no `output/` folder. Root is
+  `/work2/noaa/aoml-hafs1/emurray/ppgc-hafs/`:
+
+  | what | where |
+  |---|---|
+  | grid specs (`<case>_grid.json`) | `data/json-grids/` |
+  | grid sanity maps (`<case>_grid.png`) | `figures/regrid-wofs/` |
+  | regridded obs (`<case>_6km_<source>_<YYYYMMDDHH>.nc`), their conservation CSV and settings guard | `data/stage-iv-regrid/` |
+  | regridded-obs maps, `stats-regrid` figures and CSVs | `figures/regrid-obs-tests/<deployment>_<storm>/` |
+  | run logs | `data/logs/` |
+  | raw downloads | `data/mrms/`, `data/stage-iv/` |
+  | model inputs | `data/wofs-full/`, `data/hafs/` |
+
+  Later phases follow the same rule: data products into a `data/<kind>/` folder,
+  figures into a `figures/<kind>/` folder, named for the case. The destinations
+  are explicit keys in each case YAML (`grid_json_dir`, `grid_plot_dir`,
+  `regrid_dir`, `regrid_plot_dir`, `log_dir`).
 - **Simultaneous deployments are a feature.** A storm can have two WoFS
   domains running at once (separate `dN` runs, different grids), and each is
   verified on its own grid. The same valid window therefore appears once per
@@ -249,7 +268,7 @@ of the native one, computed in the projection plane. `grid.res_km` must be a
 whole multiple of the native spacing and the native grid must divide evenly,
 or the build stops.
 
-The spec is written to `<out_dir>/<case>_grid.json`: the MET grid-spec string,
+The spec is written to `<grid_json_dir>/<case>_grid.json`: the MET grid-spec string,
 a PROJ.4 string, the native parameters and the spacing and offset checks. Each
 deployment gets its own file; the case YAML is loaded by `deployment_case.py`.
 A deployment with `wofs.available: false` builds no grid and says so.
@@ -326,11 +345,13 @@ go with it; anomalies are now against the case's `truth_source`.
 module imports `aorc_common`; tests pass.
 
 ### B1. Cache layout
-Regridded obs live under `<regrid_cache_dir>/<res>km/`, one directory per
-deployment and resolution (`.../data/regrid_obs/<storm>/<deployment>/6km/`),
-files named `<source>_<YYYYMMDDHH>.nc`. The directory records its grid spec,
-method and width in `regrid_settings.txt`, and a different grid or setting
-refuses to reuse it, so a rebuilt grid cannot quietly mix with old output.
+Regridded obs live together in `regrid_dir` (`data/stage-iv-regrid/`), one flat
+folder for every deployment. Deployments share obs hours but not grids, so each
+file name starts with the case and resolution:
+`<case>_6km_<source>_<YYYYMMDDHH>.nc`. Beside them sit
+`<case>_6km_regrid_settings.txt`, which records the grid spec, method and width,
+and the conservation CSV. A different grid or setting refuses to reuse a
+deployment's files, so a rebuilt grid cannot quietly mix with old output.
 **Native downloads are never touched:** the MRMS re-download is the expensive
 part and those files are grid-independent.
 
@@ -344,7 +365,7 @@ have run (it reads `<case>_grid.json`) and `module load met`. Every hour in
 `(valid_start, valid_end]` is regridded; the obs files are stamped at the end
 of the hour, so the window (15Z, 18Z] is the 16Z, 17Z and 18Z files. The output
 shape is checked against the grid JSON. Every command tees its console output
-to `<out_dir>/logs/<case>_<command>_<stamp>.log` (override with `log_dir:`),
+to `<log_dir>/<case>_<command>_<stamp>.log`,
 flushed on every write, so a killed job still leaves a usable record.
 
 `download-obs` fetches MRMS for the configured sources only. Stage IV hourly

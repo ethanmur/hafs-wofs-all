@@ -18,14 +18,19 @@ DEFAULT_RES_KM = 6.0
 TRUTH_SOURCES = ("stage4", "mrms")
 TOP_KEYS = {"storm_name", "storm_id", "deployment", "best_track",
             "truth_source", "wofs", "valid_start", "valid_end", "hafs",
-            "out_dir", "mrms_cache_dir", "stage4_cache_dir", "grid",
-            "log_dir", "regrid_cache_dir", "regrid", "regrid_plots"}
+            "grid_json_dir", "grid_plot_dir", "regrid_dir", "regrid_plot_dir",
+            "log_dir", "mrms_cache_dir", "stage4_cache_dir", "grid",
+            "regrid", "regrid_plots"}
+# Where each kind of file goes. Similar files sit together, flat, under
+# data/ or figures/; there is no per-case output folder.
+PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "regrid_dir",
+             "regrid_plot_dir", "log_dir")
 WOFS_KEYS = {"root", "available", "complete_windows"}
 HAFS_KEYS = {"lookback_h", "min_members", "init_start", "init_end", "models"}
 GRID_KEYS = {"res_km"}
 REGRID_KEYS = {"sources", "method", "width", "vld_thresh", "tolerance_pct",
                "met_bin_dir", "fields"}
-PLOT_KEYS = {"out_dir", "panels"}
+PLOT_KEYS = {"panels"}
 PLOT_PANELS = ("compare-regrid", "compare-products", "compare-anomaly")
 
 
@@ -66,7 +71,11 @@ class DeploymentCase:
     wofs_root: Path
     wofs_available: bool
     complete_windows: int
-    out_dir: Path
+    grid_json_dir: Path        # data/json-grids/        <case>_grid.json
+    grid_plot_dir: Path        # figures/regrid-wofs/    <case>_grid.png
+    regrid_dir: Path           # data/stage-iv-regrid/   regridded obs + CSV
+    regrid_plot_dir: Path      # figures/regrid-obs-tests/<dep>_<storm>/
+    log_dir: Path              # data/logs/
     mrms_cache_dir: Path
     stage4_cache_dir: Path
     valid_start: Optional[datetime] = None
@@ -77,10 +86,7 @@ class DeploymentCase:
     hafs_init_end: Optional[datetime] = None
     hafs_models: dict = field(default_factory=dict)
     res_km: float = DEFAULT_RES_KM
-    log_dir: Optional[Path] = None
-    regrid_cache_dir: Optional[Path] = None
     regrid: RegridSettings = field(default_factory=RegridSettings)
-    regrid_plot_dir: Optional[Path] = None
     regrid_panels: tuple = ()               # empty = every panel
 
     @property
@@ -92,7 +98,22 @@ class DeploymentCase:
     @property
     def grid_json_path(self):
         """Where build-grid writes this deployment's grid."""
-        return self.out_dir / f"{self.case_slug}_grid.json"
+        return self.grid_json_dir / f"{self.case_slug}_grid.json"
+
+    @property
+    def grid_plot_path(self):
+        return self.grid_plot_dir / f"{self.case_slug}_grid.png"
+
+    @property
+    def regrid_prefix(self):
+        """Starts every regridded file of this deployment and resolution, so
+        deployments (which share hours but not grids) can share one folder."""
+        return f"{self.case_slug}_{self.res_km:g}km"
+
+    @property
+    def budget_csv_path(self):
+        """The conservation check, beside the regridded data it describes."""
+        return self.regrid_dir / f"regrid_budget_{self.output_slug}.csv"
 
     @property
     def regrid_sources(self):
@@ -111,7 +132,7 @@ def from_yaml(path):
     cfg = yaml.safe_load(path.read_text()) or {}
     _unknown(cfg, TOP_KEYS, "case")
     for key in ("storm_name", "storm_id", "deployment", "best_track", "wofs",
-                "out_dir", "mrms_cache_dir", "stage4_cache_dir"):
+                *PATH_KEYS, "mrms_cache_dir", "stage4_cache_dir"):
         if key not in cfg:
             raise ValueError(f"{path.name}: {key} is required")
 
@@ -155,13 +176,14 @@ def from_yaml(path):
         wofs_root=Path(wofs["root"]),
         wofs_available=available,
         complete_windows=int(wofs.get("complete_windows", 0)),
-        out_dir=Path(cfg["out_dir"]),
+        grid_json_dir=Path(cfg["grid_json_dir"]),
+        grid_plot_dir=Path(cfg["grid_plot_dir"]),
+        regrid_dir=Path(cfg["regrid_dir"]),
+        regrid_plot_dir=Path(cfg["regrid_plot_dir"]),
+        log_dir=Path(cfg["log_dir"]),
         mrms_cache_dir=Path(cfg["mrms_cache_dir"]),
         stage4_cache_dir=Path(cfg["stage4_cache_dir"]),
         res_km=float(grid.get("res_km", DEFAULT_RES_KM)),
-        log_dir=Path(cfg["log_dir"]) if cfg.get("log_dir") else None,
-        regrid_cache_dir=(Path(cfg["regrid_cache_dir"])
-                          if cfg.get("regrid_cache_dir") else None),
         regrid=RegridSettings(
             sources=sources,
             method=str(regrid.get("method", "BUDGET")).upper(),
@@ -171,12 +193,8 @@ def from_yaml(path):
             met_bin_dir=(Path(regrid["met_bin_dir"])
                          if regrid.get("met_bin_dir") else None),
             fields=dict(regrid.get("fields") or {})),
-        regrid_plot_dir=(Path(plots["out_dir"]) if plots.get("out_dir")
-                         else Path(cfg["out_dir"]) / "regrid"),
         regrid_panels=panels,
     )
-    if case.regrid_cache_dir is None:
-        case.regrid_cache_dir = case.out_dir / "regrid_cache"
     unknown_fields = set(case.regrid.fields) - set(TRUTH_SOURCES)
     if unknown_fields:
         raise ValueError(f"regrid.fields has unknown source(s) "

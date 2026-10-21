@@ -98,7 +98,7 @@ def regrid_config(case):
                          "<yaml> build-grid") from None
     settings = case.regrid
     return met_regrid.RegridConfig(
-        cache_dir=case.regrid_cache_dir / f"{case.res_km:g}km",
+        cache_dir=case.regrid_dir, prefix=case.regrid_prefix,
         grid_spec=spec, grid_name=name or case.case_slug,
         method=settings.method, width=settings.width,
         vld_thresh=settings.vld_thresh, tolerance_pct=settings.tolerance_pct,
@@ -255,7 +255,7 @@ def regrid_obs(case):
           f"vld_thresh {cfg.vld_thresh})")
     print(f"Cache:    {cfg.cache_dir}", flush=True)
 
-    staging = cfg.cache_dir / "_staging"
+    staging = cfg.staging_dir
     timestamps = hourly_timestamps(case.valid_start, case.valid_end)
     target = None
     native_grids = {}
@@ -310,8 +310,8 @@ def regrid_obs(case):
               + "  ".join(notes)
               + f"  (+{time.monotonic() - started:.0f}s)", flush=True)
 
-    case.out_dir.mkdir(parents=True, exist_ok=True)
-    out_csv = case.out_dir / f"regrid_budget_{case.output_slug}.csv"
+    out_csv = case.budget_csv_path
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(out_csv, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
         w.writeheader()

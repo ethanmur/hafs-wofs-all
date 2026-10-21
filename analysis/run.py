@@ -5,8 +5,9 @@
 Loads a per-deployment case (deployment_case.py) and runs one command:
   build-grid    build this deployment's verification grid: the WoFS domain
                 read from the WoFS files and coarsened to grid.res_km (6 km),
-                written to <out_dir>/<case>_grid.json with the MET grid spec,
-                plus a sanity map (grid outline, best track by ATCF status)
+                written to <grid_json_dir>/<case>_grid.json with the MET grid
+                spec, plus a sanity map in grid_plot_dir (grid outline, best
+                track by ATCF status)
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself

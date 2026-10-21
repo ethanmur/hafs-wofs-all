@@ -289,7 +289,7 @@ def available_sources(case, cfg, timestamps):
 def load_budget(case):
     """{(valid "YYYY-mm-dd HH:MM", source): mean_pct_diff} from the
     regrid-obs conservation CSV, or {} if it hasn't been written."""
-    path = case.out_dir / f"regrid_budget_{case.output_slug}.csv"
+    path = case.budget_csv_path
     if not path.exists():
         return {}
     with open(path, newline="") as fh:
@@ -346,7 +346,7 @@ def plot_regrid(case):
 
     out = case.regrid_plot_dir
     # compare-regrid is the common single-product case, so its maps go
-    # straight into out_dir; the multi-product panels keep subfolders.
+    # straight into the plot folder; the multi-product panels keep subfolders.
     dirs = {k: (out if k == "compare-regrid" else out / k) for k in kinds}
     domain = centred_domain(glat, glon)
     grid_desc = f"{case.res_km:g} km deployment grid ({cfg.method})"

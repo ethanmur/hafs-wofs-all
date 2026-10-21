@@ -657,10 +657,8 @@ def build_grid_case(case):
                                 "grid_mean": off_grid[1]},
         "init_folders_checked": len(dep.inits),
     })
-    out_dir = Path(case.out_dir)
-    json_path = write_grid_json(out_dir / f"{case.case_slug}_grid.json",
-                                payload)
-    png_path = plot_grid(spec, track, out_dir / f"{case.case_slug}_grid.png",
+    json_path = write_grid_json(case.grid_json_path, payload)
+    png_path = plot_grid(spec, track, case.grid_plot_path,
                          window=window,
                          title=f"{case.storm_name} {case.deployment}: "
                                "verification grid",

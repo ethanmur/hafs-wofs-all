@@ -36,6 +36,7 @@ class RegridConfig:
     cache_dir: Path
     grid_spec: str          # MET grid-specification string, from the grid JSON
     grid_name: str
+    prefix: str = ""        # starts every file name; lets deployments share a dir
     method: str = "BUDGET"
     width: int = 2
     vld_thresh: float = 0.5
@@ -46,9 +47,22 @@ class RegridConfig:
     def field_spec(self, source):
         return self.fields.get(source, DEFAULT_FIELDS[source])
 
+    def _named(self, name):
+        return self.cache_dir / (f"{self.prefix}_{name}" if self.prefix
+                                 else name)
+
     def output_path(self, source, valid_dt):
-        # Flat: one directory per grid, the source named in the filename.
-        return self.cache_dir / f"{source}_{valid_dt:%Y%m%d%H}.nc"
+        # Flat: one directory for every deployment, the deployment, grid
+        # resolution and source all named in the filename.
+        return self._named(f"{source}_{valid_dt:%Y%m%d%H}.nc")
+
+    @property
+    def settings_path(self):
+        return self._named(SETTINGS_FILE)
+
+    @property
+    def staging_dir(self):
+        return self.cache_dir / "_staging" / (self.prefix or "case")
 
 
 # =============================================================================
@@ -238,7 +252,7 @@ def check_cache_settings(config):
     The settings are recorded in the cache itself, so a changed grid, method or
     width cannot quietly reuse output regridded the old way.
     """
-    path = config.cache_dir / SETTINGS_FILE
+    path = config.settings_path
     want = (f"grid_name={config.grid_name}\nmethod={config.method}\n"
             f"width={config.width}\nvld_thresh={config.vld_thresh}\n"
             f"grid_spec={config.grid_spec}\n")
@@ -249,8 +263,9 @@ def check_cache_settings(config):
                 f"{config.cache_dir} already holds output regridded with "
                 f"different settings:\n  on disk:    "
                 f"{' '.join(have.split())}\n  configured: "
-                f"{' '.join(want.split())}\nPoint regrid_cache_dir at a new "
-                "directory, or delete the output already in this one.")
+                f"{' '.join(want.split())}\nDelete this deployment's files "
+                f"in {config.cache_dir} (they start with {config.prefix!r}) "
+                "to regrid with the new settings.")
         return
     config.cache_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(want)

@@ -62,7 +62,9 @@ def _case(tmp):
         case_slug="c", storm_name="Beryl", storm_id="2024-02l",
         deployment="20240708_d1", best_track=tmp / "bt.dat",
         truth_source="stage4", wofs_root=tmp / "w" / "2024_BERYL" / "d",
-        wofs_available=True, complete_windows=1, out_dir=tmp / "out",
+        wofs_available=True, complete_windows=1,
+        grid_json_dir=tmp / "j", grid_plot_dir=tmp / "g",
+        regrid_dir=tmp / "rg", regrid_plot_dir=tmp / "p", log_dir=tmp / "l",
         mrms_cache_dir=tmp / "m", stage4_cache_dir=tmp / "s",
         valid_start=datetime(2024, 9, 24, 0), valid_end=datetime(2024, 9, 24, 3))
 
@@ -71,8 +73,8 @@ def test_load_budget_reads_conservation_csv():
     tmp = Path(tempfile.mkdtemp())
     case = _case(tmp)
     assert load_budget(case) == {}
-    case.out_dir.mkdir(parents=True)
-    (case.out_dir / f"regrid_budget_{case.output_slug}.csv").write_text(
+    case.regrid_dir.mkdir(parents=True)
+    case.budget_csv_path.write_text(
         "valid,source,mean_pct_diff\n2024-09-24 02:00,stage4,-0.198\n")
     budget = load_budget(case)
     t = datetime(2024, 9, 24, 2)

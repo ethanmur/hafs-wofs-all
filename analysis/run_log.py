@@ -38,7 +38,7 @@ class _Tee:
 
 
 def log_path(case, command, when=None):
-    """<log_dir or out_dir/logs>/<case>_<command>_<stamp>.log"""
+    """<log_dir>/<case>_<command>_<stamp>.log"""
     when = when or datetime.now()
     base = getattr(case, "log_dir", None) or Path(case.out_dir) / "logs"
     slug = getattr(case, "case_slug", None) or "case"

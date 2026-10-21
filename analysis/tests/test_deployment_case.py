@@ -82,8 +82,7 @@ def test_regrid_defaults_to_the_truth_product_and_derives_paths(tmp_path):
     case = dc.from_yaml(_write(tmp_path, _generated(GOOD)))
     assert case.regrid_sources == ("stage4",)
     assert case.regrid.method == "BUDGET" and case.regrid.width == 2
-    assert case.regrid_cache_dir.name == "20240708_d1"
-    assert case.regrid_plot_dir == case.out_dir / "regrid"
+    assert case.regrid_prefix == "2024_02l_beryl_20240708_d1_6km"
     assert case.grid_json_path.name == "2024_02l_beryl_20240708_d1_grid.json"
     assert case.output_slug == "2024_02l_beryl_20240708_d1_2024070818_2024070821"
 
@@ -103,3 +102,30 @@ def test_regrid_block_rejects_unknown_keys_and_sources(tmp_path):
         dc.from_yaml(_write(tmp_path, dict(cfg, regrid={"grid_template": "x"})))
     with pytest.raises(ValueError):
         dc.from_yaml(_write(tmp_path, dict(cfg, regrid_plots={"panels": ["x"]})))
+
+
+def test_files_go_to_flat_data_and_figures_folders(tmp_path):
+    case = dc.from_yaml(_write(tmp_path, _generated(GOOD)))
+    root = "/work2/noaa/aoml-hafs1/emurray/ppgc-hafs"
+    assert case.grid_json_path == Path(
+        f"{root}/data/json-grids/2024_02l_beryl_20240708_d1_grid.json")
+    assert case.grid_plot_path == Path(
+        f"{root}/figures/regrid-wofs/2024_02l_beryl_20240708_d1_grid.png")
+    assert case.regrid_dir == Path(f"{root}/data/stage-iv-regrid")
+    assert case.regrid_plot_dir == Path(
+        f"{root}/figures/regrid-obs-tests/20240708_d1_beryl")
+    assert case.log_dir == Path(f"{root}/data/logs")
+    assert case.budget_csv_path.parent == case.regrid_dir
+    assert case.budget_csv_path.name.startswith("regrid_budget_2024_02l_beryl")
+    assert not hasattr(case, "out_dir")
+
+
+def test_every_destination_is_required_and_out_dir_is_gone(tmp_path):
+    cfg = _generated(GOOD)
+    for key in ("grid_json_dir", "grid_plot_dir", "regrid_dir",
+                "regrid_plot_dir", "log_dir"):
+        missing = {k: v for k, v in cfg.items() if k != key}
+        with pytest.raises(ValueError):
+            dc.from_yaml(_write(tmp_path, missing))
+    with pytest.raises(ValueError):
+        dc.from_yaml(_write(tmp_path, dict(cfg, out_dir="/x")))

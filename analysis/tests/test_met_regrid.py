@@ -389,6 +389,26 @@ def test_regrid_config_defaults_and_cache_layout():
     assert cfg.field_spec("stage4") == met_regrid.DEFAULT_FIELDS["stage4"]
 
 
+def test_prefix_keeps_deployments_apart_in_one_directory():
+    a = _config("/c", cache_dir=Path("/c"), prefix="beryl_d1_6km")
+    b = _config("/c", cache_dir=Path("/c"), prefix="beryl_d2_6km")
+    t = datetime(2024, 9, 24, 2)
+    assert a.output_path("stage4", t) == Path("/c/beryl_d1_6km_stage4_2024092402.nc")
+    assert a.output_path("stage4", t) != b.output_path("stage4", t)
+    assert a.settings_path != b.settings_path
+    assert a.staging_dir != b.staging_dir
+
+
+def test_cache_settings_are_checked_per_deployment():
+    with tempfile.TemporaryDirectory() as tmp:
+        a = _config(tmp, cache_dir=Path(tmp), prefix="a_6km")
+        b = _config(tmp, cache_dir=Path(tmp), prefix="b_6km",
+                    grid_spec="lambert 999 999 b")
+        met_regrid.check_cache_settings(a)
+        met_regrid.check_cache_settings(b)       # different grid, own settings
+        assert a.settings_path.exists() and b.settings_path.exists()
+
+
 def test_only_mrms_and_stage_iv_are_sources():
     assert met_regrid.SOURCES == ("mrms", "stage4")
     assert set(met_regrid.DEFAULT_FIELDS) == {"mrms", "stage4"}

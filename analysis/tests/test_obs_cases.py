@@ -23,8 +23,10 @@ def _case(tmp_path, **overrides):
         best_track=tmp_path / "bt.dat", truth_source="stage4",
         wofs_root=tmp_path / "wofs" / "2024_BERYL" / "20240708_d1",
         wofs_available=True, complete_windows=3,
-        out_dir=tmp_path / "out", mrms_cache_dir=tmp_path / "mrms",
-        stage4_cache_dir=tmp_path / "st4", regrid_cache_dir=tmp_path / "rg",
+        grid_json_dir=tmp_path / "json", grid_plot_dir=tmp_path / "gplots",
+        regrid_dir=tmp_path / "rg", regrid_plot_dir=tmp_path / "plots",
+        log_dir=tmp_path / "logs", mrms_cache_dir=tmp_path / "mrms",
+        stage4_cache_dir=tmp_path / "st4",
         valid_start=datetime(2024, 9, 26, 0), valid_end=datetime(2024, 9, 26, 2))
     kwargs.update(overrides)
     return dc.DeploymentCase(**kwargs)
@@ -38,7 +40,7 @@ def _touch_mrms(cache_dir, valid_dt):
 
 
 def _write_grid_json(case, nx=150, ny=150):
-    case.out_dir.mkdir(parents=True, exist_ok=True)
+    case.grid_json_dir.mkdir(parents=True, exist_ok=True)
     case.grid_json_path.write_text(json.dumps({
         "name": case.case_slug, "nx": nx, "ny": ny,
         "met_spec": f"lambert {nx} {ny} 29.0 -86.8 -82.25 6.0 6371.2 30.0 "
@@ -93,16 +95,21 @@ def test_the_truth_product_decides_what_must_be_cached(tmp_path, monkeypatch):
     assert len(check_cache_complete(both)) == 2     # no MRMS cached
 
 
-def test_regrid_config_reads_the_grid_spec_and_keys_the_cache_on_resolution(
+def test_regrid_config_reads_the_grid_spec_and_names_files_by_deployment(
         tmp_path):
     case = _case(tmp_path)
     _write_grid_json(case)
     cfg = regrid_config(case)
     assert cfg.grid_spec.startswith("lambert 150 150")
-    assert cfg.cache_dir == tmp_path / "rg" / "6km"
+    assert cfg.cache_dir == tmp_path / "rg"          # shared, flat
     assert cfg.method == "BUDGET" and cfg.width == 2
-    assert cfg.output_path("stage4", datetime(2024, 9, 26, 1)).name == \
-        "stage4_2024092601.nc"
+    # deployments share hours but not grids, so the name carries the case
+    assert cfg.output_path("stage4", datetime(2024, 9, 26, 1)) == (
+        tmp_path / "rg"
+        / "2024_02l_beryl_20240708_d1_6km_stage4_2024092601.nc")
+    assert cfg.settings_path.name == (
+        "2024_02l_beryl_20240708_d1_6km_regrid_settings.txt")
+    assert cfg.staging_dir == tmp_path / "rg" / "_staging" / cfg.prefix
 
 
 def test_regrid_config_without_a_grid_says_to_run_build_grid(tmp_path):
