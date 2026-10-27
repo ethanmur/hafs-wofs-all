@@ -67,6 +67,8 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   | regridded obs (`<YYYYMMDDHH>_<source>_6km.nc`), their conservation CSV and settings guard | `data/stage-iv-regrid/<deployment>_<storm>/` |
   | regridded-obs maps, `stats-regrid` figures and CSVs | `figures/regrid-obs-tests/<deployment>_<storm>/` |
   | observation-validity masks (`<case>_obs_valid.nc`), their maps | `data/obs-valid-masks/`, `figures/obs-valid-masks/` |
+  | window manifests (`<case>_manifest.csv`, `<case>_windows.csv`) | `data/window-manifests/` |
+  | WoFS 3 h windows (`<windowEnd>_i<init>_wofs_6km.nc`) and their conservation CSV | `data/wofs-regrid/<deployment>_<storm>/` |
   | run logs | `data/logs/` |
   | raw downloads | `data/mrms/`, `data/stage-iv/` |
   | model inputs | `data/wofs-full/`, `data/hafs/` |
@@ -74,7 +76,8 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   Later phases follow the same rule: data products into a `data/<kind>/` folder,
   figures into a `figures/<kind>/` folder, named for the case. The destinations
   are explicit keys in each case YAML (`grid_json_dir`, `grid_plot_dir`,
-  `regrid_dir`, `regrid_plot_dir`, `mask_dir`, `mask_plot_dir`, `log_dir`).
+  `regrid_dir`, `regrid_plot_dir`, `mask_dir`, `mask_plot_dir`, `manifest_dir`,
+  `wofs_regrid_dir`, `log_dir`).
 
   **Resolution.** 6 km is the default and adds nothing to any name, so every
   default path above is exactly as written. Another resolution (`grid.res_km` in
@@ -488,12 +491,18 @@ computed whenever that analysis is done, with no rework of anything earlier.
 
 ## Phase D — WoFS and forecast-side 3 h accumulations
 
-### D0. Delete: HAFS case configuration and ATCF parsing for the old scope
-Replace `hafs_case.py` (StormCase with `domain`, `mask_radius_km`,
-per-initialization fields) by the per-deployment case from A1. Keep only the
-ATCF/b-deck parsing that A3 uses, and move it beside `best_track.py`.
+### D0. Delete: the old HAFS case, window and plot modules
+Done: `hafs_case.py` (the old StormCase and per-initialization ATCF/cycle
+logic), `hafs_windows.py` and `hafs_obs_plots.py`, which were written against it
+and are rebuilt in D4 and D5b, and the schedule-based run pairing in
+`accum_windows.py` (`hafs_runs`, `wofs_runs`, `covers`, `coverage`, `print_windows`).
+The two b-deck helpers still needed (`decode_latlon`, `position_on_track`) moved
+into `best_track.py`; `accum_windows.py` is now only `Window`, `clock_windows`
+and `format_lead`. Runs are paired from what is on disk (D6), not from a
+nominal schedule.
 
-*Check:* one case class; tests pass.
+*Check:* one case class (`DeploymentCase`); no module imports a deleted name;
+tests pass.
 
 ### D1. Accumulation convention
 
@@ -549,64 +558,58 @@ Individual runs come first: each member is a separate "run" in the manifest
 with its own id, so member -> ensemble is later a group-by, not a refactor.
 
 ### D2. Absolute-clock window definition (`accum_windows.py`)
-Produces the list of 3 h windows spanning `valid_start` -> `valid_end` on the
-00/03/06...Z clock and, for each model run, the lead offsets covering each
-window. Drops windows a run cannot fully span. HAFS runs come from the nominal
-cycle schedule and need no data. **WoFS runs come from the A1 availability
-table**, not from a nominal 30 min schedule with a fixed 6 h length: only
-`complete` (init, window) pairs are paired, and the others are carried forward
-with their status for D6. The old `wofs_runs` constants (`WOFS_MAX_LEAD_MIN`,
-cycle spacing) are replaced by what is on disk. **HAFS members per window come
-from the A1b rule** (cycles within `lookback_h` before the window start, strictly
-before it), checked against the cycles actually on disk; a window with no member
-is carried forward as WoFS-only.
+`clock_windows(valid_start, valid_end)` returns the 3 h windows on the
+00/03/06...Z clock that lie fully inside the scored period; a window hanging off
+either end would be scored against a partial accumulation. Everything is in
+whole minutes: WoFS cycles every 30 min and writes every 5, so leads like
+f02:30 are routine. A window is `(start, end]`; the lead of a (run, window)
+pair is measured at the window **end** (`format_lead`), so every lead-time plot
+means the same thing: how far out the forecast had run when the accumulation was
+complete.
 
-Three decisions worth recording:
+Which runs cover a window is not decided here but by what is on disk: the WoFS
+availability from A1 (the exact steps `s+1 .. s+36`) and the HAFS members from
+A1b. D6 combines them.
 
-- **Whole minutes everywhere.** WoFS cycles every 30 min and writes every
-  5, so f02:30 is routine; in float hours "is this lead on the model's
-  accumulation granularity" becomes a tolerance question instead of an exact
-  one.
-- **`step_min` is accumulation granularity, not output frequency.** For HAFS
-  that is the 3 h bucket from D1 (180), not the hourly output — a 1 h slice of
-  a 3 h bucket does not exist. This is what makes a 20–23Z window correctly
-  unreachable from an 18Z HAFS init while 21–00Z is f003–f006. For WoFS it is
-  the 5 min output step.
-- **Lead is measured at the window end.** Defined once on `Coverage.lead_h`,
-  so every lead-time plot means the same thing: how far out the forecast had
-  run by the time the accumulation was complete.
+*Check:* unit tests: the clock is anchored at 00Z for any `valid_start`, partial
+windows at both ends are dropped, leads read as `f003` / `f02:30`.
 
-Worked example for the 18–21Z window, WoFS 6 h runs at 30 min cycling:
+### D3. WoFS 3 h windows on the deployment grid (`wofs_windows.py`)
 
-| WoFS init | lead covering 18–21Z |
-|---|---|
-| 1500Z | f03–f06 |
-| 1530Z | f02:30–f05:30 |
-| 1600Z | f02–f05 |
-| ... | ... |
-| 1800Z | f00–f03 |
+    python analysis/run.py storms/<case>.yaml regrid-wofs [--res-km N]
 
-A 1430Z init ends at 2030Z (short of 21Z) and an 1830Z init starts after 18Z;
-both are dropped. Every usable run carries its own `wofs_lead_h`, which gives
-WoFS's internal lead-time dependence for free.
+For every complete (init, window) pair in the D6 manifest, in one pass:
 
-*Check:* unit tests — a 1730Z 6 h run yields exactly the 18–21Z window at
-f00:30–f03:30; a 1430Z run yields none; HAFS bucket-granularity cases.
+1. Sum the 36 five-minute files of the window. `rain` is a per-interval
+   accumulation in inches, one file per step holding all 18 members, so the
+   window is the sum of steps `s+1 .. s+36`; no differencing is needed, and
+   step 00 (the init itself) is never used.
+2. Convert inches to mm (x 25.4).
+3. Put it on the grid. At 6 km each cell is exactly a 2 x 2 block of WoFS cells,
+   so the area-conserving regrid is the **block mean**, which is what MET's
+   budget method returns onto a nested grid, without 18 members x ~160 windows
+   of subprocess calls. At 3 km the grid is native and nothing is averaged.
+   NaN in any cell of a block makes the coarse cell NaN.
+4. Write one NetCDF per (init, window), all members in it, to `wofs_regrid_dir`
+   (`data/wofs-regrid/<deployment>_<storm>/`):
+   `<windowEnd YYYYMMDDHH>_i<init YYYYMMDDHHMM>_wofs_6km.nc`, variable `rain_mm`
+   with dimensions `(ne, lat, lon)`, in MET's NetCDF grid convention so
+   `grid_stat` can read a member with `level="(<member>,*,*)"`.
 
-### D3. WoFS 3 h windows on the deployment grid
-For each (member, init, window) the A1 table marks `complete`: accumulate the
-36 five-minute steps into the 3 h window and put it on the 6 km grid. `rain` is
-a per-interval accumulation in inches, so the window is a sum of steps
-`s+1 .. s+36`, converted to mm (x 25.4); no differencing is needed. A pair that
-is not `complete` is never partially summed: a 35-step total is not a 3 h total
-and would bias every threshold, the same reason a missing obs hour makes an obs
-window missing. Each deployment's windows are put on that deployment's own grid. The 3 -> 6 km step is a budget regrid to the A2 grid, not a block mean
-written by hand, so WoFS goes through the same operator as everything else.
+A pair that is not `complete` is never partly summed: a 35-step total is not a
+3 h total and would bias every threshold, the same reason a missing obs hour
+makes an obs window missing. Existing outputs are reused, so a rerun does only
+what is missing.
 
-*Check:* conservation CSV, same form as obs; domain-mean preserved to a few
-tenths of a percent.
+*Check:* `regrid_budget_<start>_<end>.csv` beside the files, one row per window:
+domain-mean change from coarsening (zero to rounding for a block mean; flagged
+above 0.1%), NaN cells (flagged if any) and the ensemble-mean maximum. Still to
+confirm on the cluster: MET reads a member back,
+`plot_data_plane <file> out.ps 'name="rain_mm"; level="(0,*,*)";'`, and one
+window agrees with `regrid_data_plane` BUDGET run on the same sum.
 
-*MET:* `pcp_combine`, `regrid_data_plane` (BUDGET).
+*MET:* none to produce the windows; `regrid_data_plane` only for that one-off
+validation.
 
 ### D4. HAFS 3 h windows on the deployment grid (`hafs_windows.py`)
 `regrid_data_plane` takes `-field 'name="APCP"; level="A3";'` and selects the
@@ -658,20 +661,38 @@ Panels are drawn unclipped with the validity region outlined.
 regridding or window pairing is wrong; one that disagrees in amount is the
 forecast being wrong, which is the thing being measured.
 
-### D6. Window manifest
-A CSV inventory of every `(model, deployment, run id, member, init,
-window_start, window_end, lead_h, status)`, before any statistics run; the
-proximity columns join it in G3. WoFS rows carry the A1 status (`complete`,
-`missing_steps`, `short_run`, `no_files`) and HAFS rows carry the D4 source
-status, so every window a deployment was expected to supply is accounted for:
-served, or missing with a reason. HAFS rows carry the member count per
-configuration, and a window with no HAFS member is marked `hafs_available:
-false` (WoFS-only) instead of being dropped. Deployments with no served windows
-(Idalia as downloaded) appear here explicitly. Where deployments overlap in time, the same
-valid window appears once per deployment.
+### D6. Window manifest (`window_manifest.py`)
 
-*Check:* read it — this is where silent data gaps surface cheaply rather than
-as strange scores later.
+    python analysis/run.py storms/<case>.yaml build-manifest
+
+Per deployment, two CSVs in `manifest_dir` (`data/window-manifests/`), named for
+the case:
+
+- `<case>_manifest.csv`: one row per (window, model run) with `model`, `run`,
+  `init`, `lead`, `lead_h`, `status` and `source`. WoFS rows are every init that
+  could reach the window, with the A1 status (`complete`, `missing_steps`,
+  `short_run`, `no_files`). HAFS rows are every *expected* cycle of each
+  configuration, the six-hourly cycles from `lookback_h` back up to but not
+  including the window start, with the A1b status plus `no_cycle` for cycles HAFS
+  never ran (it stops cycling a storm after landfall). Complete HAFS rows carry
+  the path of the file holding the bucket.
+- `<case>_windows.csv`: one row per window with the WoFS runs and HAFS members
+  counted and a `category`:
+
+  | category | meaning |
+  |---|---|
+  | `testable` | a complete WoFS run **and** at least `min_members` (8) HAFS members, HFSA and HFSB together |
+  | `wofs_only` | a complete WoFS run, too few HAFS members: WoFS can be scored against the obs but the window stays out of head-to-head comparison |
+  | `no_wofs` | no complete WoFS run: nothing can be verified |
+
+Nothing is dropped: every pair that cannot be used stays with its reason, so a
+silent data gap surfaces here, cheaply, instead of as a strange score later.
+Where deployments overlap in time, the same valid window appears once per
+deployment. The proximity columns join in G3. `regrid-wofs` and the HAFS regrid
+(D4) read their work list from this manifest.
+
+*Check:* read it: windows per category per deployment match the inventories
+(A1, A1b), and an unavailable deployment (Idalia) says so and writes nothing.
 
 ---
 

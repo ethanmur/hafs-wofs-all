@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 
-import deployment_case as dc
+from case_helpers import make_case
 from obs_regrid_plots import (crop_slices, load_budget, track_segment,
                               available_sources, _budget_note)
 
@@ -58,16 +58,8 @@ def test_crop_slices_none_outside_grid():
 
 
 def _case(tmp):
-    return dc.DeploymentCase(
-        case_slug="c", storm_name="Beryl", storm_id="2024-02l",
-        deployment="20240708_d1", best_track=tmp / "bt.dat",
-        truth_source="stage4", wofs_root=tmp / "w" / "2024_BERYL" / "d",
-        wofs_available=True, complete_windows=1,
-        grid_json_dir=tmp / "j", grid_plot_dir=tmp / "g",
-        regrid_dir=tmp / "rg", regrid_plot_dir=tmp / "p",
-        mask_dir=tmp / "m2", mask_plot_dir=tmp / "mp", log_dir=tmp / "l",
-        mrms_cache_dir=tmp / "m", stage4_cache_dir=tmp / "s",
-        valid_start=datetime(2024, 9, 24, 0), valid_end=datetime(2024, 9, 24, 3))
+    return make_case(tmp, case_slug="c", valid_start=datetime(2024, 9, 24, 0),
+                     valid_end=datetime(2024, 9, 24, 3))
 
 
 def test_load_budget_reads_conservation_csv():

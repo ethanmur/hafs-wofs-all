@@ -191,18 +191,8 @@ def write_mask_netcdf(path, spec, mask, lat, lon, name=MASK_NAME,
             f"{buffer_km:g} km of US land, excluding land masses not "
             f"connected to the US")
         # MET NetCDF grid definition (Lambert conformal).
-        nc.Projection = "Lambert Conformal"
-        nc.scale_lat_1 = f"{spec.lat_1:.6f} degrees_north"
-        nc.scale_lat_2 = f"{spec.lat_2:.6f} degrees_north"
-        nc.lat_pin = f"{spec.lat_ll:.6f} degrees_north"
-        nc.lon_pin = f"{spec.lon_ll:.6f} degrees_east"
-        nc.x_pin = "0.000000"
-        nc.y_pin = "0.000000"
-        nc.lon_orient = f"{spec.lon_0:.6f} degrees_east"
-        nc.d_km = f"{spec.res_km:.6f} km"
-        nc.r_km = f"{vg.R_EARTH_KM:.6f} km"
-        nc.nx = f"{spec.nx}"
-        nc.ny = f"{spec.ny}"
+        for key, value in vg.met_grid_attrs(spec).items():
+            setattr(nc, key, value)
         nc.mask_name = name
         nc.coast_buffer_km = f"{buffer_km:g}"
     return path

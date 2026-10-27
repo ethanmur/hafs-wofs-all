@@ -185,6 +185,26 @@ def grid_spec_from_json(path):
         source=payload.get("source", ""))
 
 
+def met_grid_attrs(spec):
+    """Global attributes that describe the grid to MET in its NetCDF
+    convention, for any NetCDF written on this grid that grid_stat or
+    plot_data_plane should read (east-positive longitudes, per the A2 lesson)."""
+    return {
+        "Projection": "Lambert Conformal",
+        "scale_lat_1": f"{spec.lat_1:.6f} degrees_north",
+        "scale_lat_2": f"{spec.lat_2:.6f} degrees_north",
+        "lat_pin": f"{spec.lat_ll:.6f} degrees_north",
+        "lon_pin": f"{spec.lon_ll:.6f} degrees_east",
+        "x_pin": "0.000000",
+        "y_pin": "0.000000",
+        "lon_orient": f"{spec.lon_0:.6f} degrees_east",
+        "d_km": f"{spec.res_km:.6f} km",
+        "r_km": f"{R_EARTH_KM:.6f} km",
+        "nx": f"{spec.nx}",
+        "ny": f"{spec.ny}",
+    }
+
+
 def write_grid_json(path, payload):
     import json
     path = Path(path)

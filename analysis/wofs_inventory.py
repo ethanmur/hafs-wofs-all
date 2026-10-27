@@ -205,6 +205,16 @@ class Deployment:
     empty_inits: dict = field(default_factory=dict)  # hhmm -> inferred init
 
 
+def step_files(path):
+    """{step: file path} for one <HHMM> init folder."""
+    out = {}
+    for f in sorted(Path(path).glob("wofs_ALL_*.nc")):
+        parsed = parse_wofs_name(f.name)
+        if parsed:
+            out[parsed[0]] = f
+    return out
+
+
 def scan_init_dir(path):
     """InitDir for one <HHMM> folder, or None if it holds no WoFS files."""
     files = {}

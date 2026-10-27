@@ -30,9 +30,8 @@ import matplotlib.colors as mcolors
 from matplotlib.transforms import blended_transform_factory
 import cartopy.crs as ccrs
 
-from hafs_case import position_on_track
 from plot_units import inches
-from best_track import parse_bdeck
+from best_track import parse_bdeck, position_on_track
 from plot_common import add_us_geography, QPF_LEVELS, qpf_cmap
 import met_regrid
 import verification_grid as vg

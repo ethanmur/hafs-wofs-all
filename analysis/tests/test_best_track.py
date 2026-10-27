@@ -5,7 +5,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 FIX = Path(__file__).resolve().parent / "fixtures"
 
-from best_track import (parse_bdeck, parse_bdeck_fixes,
+from best_track import (decode_latlon, position_on_track, parse_bdeck,
+                        parse_bdeck_fixes,
                         parse_bdeck_status, bdeck_summary)
 
 
@@ -71,3 +72,21 @@ def _run_all():
 
 if __name__ == "__main__":
     _run_all()
+
+
+def test_decode_latlon():
+    assert decode_latlon("168N") == 16.8
+    assert decode_latlon("832W") == -83.2
+    assert decode_latlon("105S") == -10.5
+    assert decode_latlon("50E") == 5.0
+
+
+def test_position_on_track_interpolates_and_clamps():
+    track = [
+        (datetime(2024, 9, 24, 0), 16.8, -83.2),
+        (datetime(2024, 9, 24, 6), 17.8, -83.5),
+    ]
+    lat, lon = position_on_track(track, datetime(2024, 9, 24, 3))
+    assert abs(lat - 17.3) < 1e-9 and abs(lon - (-83.35)) < 1e-9
+    assert position_on_track(track, datetime(2024, 9, 23, 0)) == (16.8, -83.2)
+    assert position_on_track(track, datetime(2024, 9, 25, 0)) == (17.8, -83.5)

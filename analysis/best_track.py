@@ -10,7 +10,40 @@ from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from hafs_case import decode_latlon
+
+
+def decode_latlon(token):
+    """ATCF tenths-of-degree + hemisphere token -> signed float degrees.
+
+    '168N' -> 16.8, '832W' -> -83.2, '105S' -> -10.5, '50E' -> 5.0.
+    """
+    token = token.strip()
+    hemi = token[-1].upper()
+    value = int(token[:-1]) / 10.0
+    if hemi in ("S", "W"):
+        value = -value
+    return value
+
+
+def position_on_track(track, valid_dt):
+    """Linear interpolation of a [(dt, lat, lon), ...] track to any time.
+
+    Clamps to the endpoints outside the track's time span.
+    """
+    times = [t for t, _, _ in track]
+    lats = [la for _, la, _ in track]
+    lons = [lo for _, _, lo in track]
+    if valid_dt <= times[0]:
+        return lats[0], lons[0]
+    if valid_dt >= times[-1]:
+        return lats[-1], lons[-1]
+    for i in range(len(times) - 1):
+        if times[i] <= valid_dt <= times[i + 1]:
+            frac = ((valid_dt - times[i]).total_seconds()
+                    / (times[i + 1] - times[i]).total_seconds())
+            return (lats[i] + frac * (lats[i + 1] - lats[i]),
+                    lons[i] + frac * (lons[i + 1] - lons[i]))
+    return lats[-1], lons[-1]
 
 
 def _rmw_km(cols):

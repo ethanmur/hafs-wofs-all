@@ -136,6 +136,27 @@ def scan_config(config_dir):
     return cycles, notes
 
 
+def index_config_files(config_dir):
+    """{(init_dt, lead_h): path} for every parent.atm file of one
+    <storm>/<config> folder -- where a (cycle, lead) bucket actually lives."""
+    out = {}
+    config_dir = Path(config_dir)
+    if not config_dir.is_dir():
+        return out
+    for sub in config_dir.iterdir():
+        if not sub.is_dir():
+            continue
+        try:
+            folder_init = parse_init(sub.name)
+        except ValueError:
+            continue
+        for f in sub.iterdir():
+            m = PARENT_RE.match(f.name)
+            if m and parse_init(m.group("init")) == folder_init:
+                out[(folder_init, int(m.group("lead")))] = f
+    return out
+
+
 def scan_archive(root):
     """{(storm_id, config): ({init: leads}, notes)} for the mapped storms."""
     root = Path(root)

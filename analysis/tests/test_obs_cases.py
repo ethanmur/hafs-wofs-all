@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import deployment_case as dc
 import obs_cases
+from case_helpers import make_case
 import stage4_hourly
 from obs_cases import (hourly_timestamps, check_cache_complete, mrms_s3_key,
                        regrid_config, grid_shape_from_json, read_grid_meta, download_obs,
@@ -17,20 +18,12 @@ from obs_cases import (hourly_timestamps, check_cache_complete, mrms_s3_key,
 
 
 def _case(tmp_path, **overrides):
-    kwargs = dict(
-        case_slug="2024_02l_beryl_20240708_d1", storm_name="Beryl",
-        storm_id="2024-02l", deployment="20240708_d1",
-        best_track=tmp_path / "bt.dat", truth_source="stage4",
-        wofs_root=tmp_path / "wofs" / "2024_BERYL" / "20240708_d1",
-        wofs_available=True, complete_windows=3,
-        grid_json_dir=tmp_path / "json", grid_plot_dir=tmp_path / "gplots",
-        regrid_dir=tmp_path / "rg", regrid_plot_dir=tmp_path / "plots",
-        mask_dir=tmp_path / "masks", mask_plot_dir=tmp_path / "mplots",
-        log_dir=tmp_path / "logs", mrms_cache_dir=tmp_path / "mrms",
-        stage4_cache_dir=tmp_path / "st4",
-        valid_start=datetime(2024, 9, 26, 0), valid_end=datetime(2024, 9, 26, 2))
-    kwargs.update(overrides)
-    return dc.DeploymentCase(**kwargs)
+    # this module's directories keep the short names its fixtures expect
+    names = dict(regrid_dir=tmp_path / "rg", mrms_cache_dir=tmp_path / "mrms",
+                 stage4_cache_dir=tmp_path / "st4",
+                 grid_json_dir=tmp_path / "json")
+    names.update(overrides)
+    return make_case(tmp_path, **names)
 
 
 def _touch_mrms(cache_dir, valid_dt):
