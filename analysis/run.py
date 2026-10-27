@@ -1,6 +1,6 @@
 """Single entry point for the HAFS/WoFS rainfall verification framework.
 
-    python analysis/run.py <case.yaml> <command>
+    python analysis/run.py <case.yaml> <command> [--res-km N]
 
 Loads a per-deployment case (deployment_case.py) and runs one command:
   build-grid    build this deployment's verification grid: the WoFS domain
@@ -24,6 +24,10 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 regridded products, per hour and over the whole period, plus
                 stats CSVs (needs both products regridded)
 
+Resolution is 6 km unless a case sets grid.res_km or the run passes --res-km;
+only a non-default resolution adds its label to output names, so the default
+run's files never move.
+
 The masking, window-listing and HAFS commands return with the plan steps that
 rebuild them on this case format (see docs/analysis_plan.md, phases C and D).
 """
@@ -38,16 +42,27 @@ COMMANDS = ("build-grid", "download-obs", "regrid-obs", "plot-regrid",
 
 
 def parse_args(argv):
-    """(yaml_path, command) from argv; the command is required."""
+    """(yaml_path, command, res_km) from argv. The command is required;
+    --res-km N overrides the case's grid.res_km (None keeps it)."""
+    argv = list(argv)
+    res_km = None
+    if "--res-km" in argv:
+        i = argv.index("--res-km")
+        try:
+            res_km = float(argv[i + 1])
+        except (IndexError, ValueError):
+            print("--res-km needs a number, e.g. --res-km 3")
+            raise SystemExit(2)
+        del argv[i:i + 2]
     if len(argv) < 2:
-        print("usage: run.py <case.yaml> <command>\n"
+        print("usage: run.py <case.yaml> <command> [--res-km N]\n"
               f"commands: {' | '.join(COMMANDS)}")
         raise SystemExit(2)
     yaml_path, command = argv[0], argv[1]
     if command not in COMMANDS:
         print(f"unknown command '{command}'; choose from {COMMANDS}")
         raise SystemExit(2)
-    return yaml_path, command
+    return yaml_path, command, res_km
 
 
 def dispatch(case, command):
@@ -69,10 +84,10 @@ def dispatch(case, command):
 
 
 def main(argv):
-    yaml_path, command = parse_args(argv)
+    yaml_path, command, res_km = parse_args(argv)
     import deployment_case
     import run_log
-    case = deployment_case.from_yaml(yaml_path)
+    case = deployment_case.from_yaml(yaml_path, res_km=res_km)
     with run_log.tee(case, command):
         dispatch(case, command)
 

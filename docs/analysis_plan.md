@@ -72,6 +72,18 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   figures into a `figures/<kind>/` folder, named for the case. The destinations
   are explicit keys in each case YAML (`grid_json_dir`, `grid_plot_dir`,
   `regrid_dir`, `regrid_plot_dir`, `log_dir`).
+
+  **Resolution.** 6 km is the default and adds nothing to any name, so every
+  default path above is exactly as written. Another resolution (`grid.res_km` in
+  the YAML, or `--res-km N` on any `run.py` command, which needs no copy of the
+  YAML) adds its label only where names would collide with the default run's:
+  `<case>_3km_grid.json`, `<case>_3km_grid.png`,
+  `regrid_budget_<start>_<end>_3km.csv`, and the map folder
+  `<deployment>_<storm>_3km/`. The regridded files and `regrid_settings_*.txt`
+  already carry the label (`2024092707_stage4_3km.nc`) and share the
+  deployment's folder. `regrid-obs` stops if the grid JSON it reads is not the
+  resolution of the run, so files labelled 3km can never be written onto the
+  6 km grid.
 - **Simultaneous deployments are a feature.** A storm can have two WoFS
   domains running at once (separate `dN` runs, different grids), and each is
   verified on its own grid. The same valid window therefore appears once per
@@ -291,9 +303,13 @@ Tuning `width` upward for BUDGET does nothing.
 *Check:* the build compares the grid it made against the file's own `xlat` /
 `xlon` arrays: native cell centres, and the means of each 2 x 2 block against
 the 6 km cell centres. They agree to better than a metre when the projection
-is read correctly. The build stops if the 6 km centres are more than a tenth
-of a cell (0.6 km) from the file, since a misread standard parallel or
-longitude shows up as an offset growing away from the lower-left corner.
+is read correctly. The build stops if the grid is more than 0.75 km from
+the file. The limit is a fixed distance, not a fraction of a cell, because the
+disagreement is a property of the file (WRF's 6370 km sphere against MET's
+6371.2 km, and coordinates stored to 5 significant digits: up to ~0.56 km on
+the real 2023-2024 files), not of the resolution; 0.75 km is a quarter of the
+finest cell supported (3 km). A misread standard parallel or longitude would
+show up as an offset growing away from the lower-left corner.
 
 *MET:* none for construction; the output *is* the grid spec consumed
 downstream (`regrid_data_plane -to_grid`, and `grid_stat`'s `regrid.to_grid`).
@@ -656,7 +672,7 @@ config, schema and plotting default. Search the repo for each.
 ### E1. `grid_stat` configuration
 - thresholds: 0.5 / 1 / 2.5 / 5 / 10 / 25 / 50 mm per 3 h
 - mask: `FULL` = whole deployment grid ∩ `obs_valid` (one region now)
-- neighborhood widths: 1 / 3 / 5 / 9 / 21 cells = 6 / 18 / 30 / 54 / 126 km
+- neighborhood widths defined in km: 6 / 18 / 30 / 54 / 126 km, which is 1 / 3 / 5 / 9 / 21 cells at 6 km (2 / 6 / 10 / 18 / 42 at 3 km), so the scales mean the same distances at any resolution
 - line types: `CTC CTS CNT SL1L2 NBRCTC NBRCNT`
 - `interp` none (already on a common grid)
 

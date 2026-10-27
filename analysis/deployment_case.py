@@ -48,6 +48,15 @@ def _unknown(block, allowed, where):
         raise ValueError(f"unknown {where} keys: {', '.join(sorted(extra))}")
 
 
+def _resolution_dir(path, res_km):
+    """A plot folder for the default resolution is used as written; another
+    resolution gets its own sibling (20240927_d1_helene_3km), so its maps never
+    overwrite the default run's."""
+    if res_km == DEFAULT_RES_KM:
+        return path
+    return path.with_name(f"{path.name}_{res_km:g}km")
+
+
 @dataclass
 class RegridSettings:
     """How regrid-obs runs MET. `sources` empty means just the truth product."""
@@ -96,13 +105,20 @@ class DeploymentCase:
                 f"{self.valid_end:%Y%m%d%H}")
 
     @property
+    def res_suffix(self):
+        """"" at the default 6 km, so every default path is unchanged; any
+        other resolution adds `_<res>km` to the names that would otherwise
+        collide with the default run's (grid JSON, grid map, budget CSV)."""
+        return "" if self.res_km == DEFAULT_RES_KM else f"_{self.res_label}"
+
+    @property
     def grid_json_path(self):
         """Where build-grid writes this deployment's grid."""
-        return self.grid_json_dir / f"{self.case_slug}_grid.json"
+        return self.grid_json_dir / f"{self.case_slug}{self.res_suffix}_grid.json"
 
     @property
     def grid_plot_path(self):
-        return self.grid_plot_dir / f"{self.case_slug}_grid.png"
+        return self.grid_plot_dir / f"{self.case_slug}{self.res_suffix}_grid.png"
 
     @property
     def folder_name(self):
@@ -120,7 +136,8 @@ class DeploymentCase:
     def budget_csv_path(self):
         """The conservation check, beside the regridded data it describes."""
         return self.regrid_dir / (f"regrid_budget_{self.valid_start:%Y%m%d%H}_"
-                                  f"{self.valid_end:%Y%m%d%H}.csv")
+                                  f"{self.valid_end:%Y%m%d%H}"
+                                  f"{self.res_suffix}.csv")
 
     @property
     def regrid_sources(self):
@@ -134,7 +151,9 @@ class DeploymentCase:
         return self.wofs_root.parent.name
 
 
-def from_yaml(path):
+def from_yaml(path, res_km=None):
+    """The case in `path`. `res_km` overrides grid.res_km (run.py --res-km), so
+    another resolution needs no copy of the YAML."""
     path = Path(path)
     cfg = yaml.safe_load(path.read_text()) or {}
     _unknown(cfg, TOP_KEYS, "case")
@@ -167,6 +186,8 @@ def from_yaml(path):
     if bad:
         raise ValueError(f"regrid_plots.panels has unknown panel(s) {bad}; "
                          f"expected any of {PLOT_PANELS}")
+    res = float(res_km if res_km is not None
+                else grid.get("res_km", DEFAULT_RES_KM))
     sources = tuple(str(v).lower() for v in (regrid.get("sources") or ()))
     bad = [v for v in sources if v not in TRUTH_SOURCES]
     if bad:
@@ -186,11 +207,11 @@ def from_yaml(path):
         grid_json_dir=Path(cfg["grid_json_dir"]),
         grid_plot_dir=Path(cfg["grid_plot_dir"]),
         regrid_dir=Path(cfg["regrid_dir"]),
-        regrid_plot_dir=Path(cfg["regrid_plot_dir"]),
+        regrid_plot_dir=_resolution_dir(Path(cfg["regrid_plot_dir"]), res),
         log_dir=Path(cfg["log_dir"]),
         mrms_cache_dir=Path(cfg["mrms_cache_dir"]),
         stage4_cache_dir=Path(cfg["stage4_cache_dir"]),
-        res_km=float(grid.get("res_km", DEFAULT_RES_KM)),
+        res_km=res,
         regrid=RegridSettings(
             sources=sources,
             method=str(regrid.get("method", "BUDGET")).upper(),

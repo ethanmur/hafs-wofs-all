@@ -131,3 +131,38 @@ def test_every_destination_is_required_and_out_dir_is_gone(tmp_path):
             dc.from_yaml(_write(tmp_path, missing))
     with pytest.raises(ValueError):
         dc.from_yaml(_write(tmp_path, dict(cfg, out_dir="/x")))
+
+
+def test_default_resolution_leaves_every_path_unchanged(tmp_path):
+    case = dc.from_yaml(_write(tmp_path, _generated(GOOD)))
+    assert case.res_km == 6.0 and case.res_suffix == ""
+    assert case.grid_json_path.name == "2024_02l_beryl_20240708_d1_grid.json"
+    assert case.grid_plot_path.name == "2024_02l_beryl_20240708_d1_grid.png"
+    assert case.budget_csv_path.name == "regrid_budget_2024070818_2024070821.csv"
+    assert case.regrid_plot_dir.name == "20240708_d1_beryl"
+
+
+def test_other_resolutions_add_their_label_where_names_would_collide(tmp_path):
+    path = _write(tmp_path, _generated(GOOD))
+    six = dc.from_yaml(path)
+    three = dc.from_yaml(path, res_km=3.0)
+    assert three.res_suffix == "_3km" and three.res_label == "3km"
+    assert three.grid_json_path.name == \
+        "2024_02l_beryl_20240708_d1_3km_grid.json"
+    assert three.grid_plot_path.name == \
+        "2024_02l_beryl_20240708_d1_3km_grid.png"
+    assert three.budget_csv_path.name == \
+        "regrid_budget_2024070818_2024070821_3km.csv"
+    assert three.regrid_plot_dir.name == "20240708_d1_beryl_3km"
+    # nothing the two runs write can be the same file
+    for attr in ("grid_json_path", "grid_plot_path", "budget_csv_path",
+                 "regrid_plot_dir"):
+        assert getattr(three, attr) != getattr(six, attr), attr
+    # the regridded files and settings already carry the resolution; same folder
+    assert three.regrid_dir == six.regrid_dir
+
+
+def test_yaml_grid_block_sets_the_resolution_and_the_override_wins(tmp_path):
+    path = _write(tmp_path, dict(_generated(GOOD), grid={"res_km": 3.0}))
+    assert dc.from_yaml(path).res_km == 3.0
+    assert dc.from_yaml(path, res_km=6.0).res_km == 6.0

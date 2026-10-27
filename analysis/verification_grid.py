@@ -401,9 +401,13 @@ def _grid_outline(lat, lon):
 
 WOFS_REQUIRED_ATTRS = ("start_lat", "start_lon", "lon_orient", "scale_lat_1",
                        "scale_lat_2", "d_km", "nx", "ny")
-# Worst tolerated disagreement between the grid built from a file's attributes
-# and the file's own xlat/xlon arrays, as a fraction of a verification cell.
-MAX_OFFSET_FRACTION = 0.1
+# Worst tolerated disagreement, in km, between the grid built from a file's
+# attributes and the file's own xlat/xlon arrays. It is a property of the file,
+# not of the resolution: WRF's 6370 km sphere against MET's 6371.2 km, and
+# coordinates stored to 5 significant digits, give up to ~0.56 km on the real
+# 2023-2024 files. 0.75 km is a quarter of the finest supported cell (3 km),
+# so the same limit serves 6 km and 3 km.
+MAX_OFFSET_KM = 0.75
 
 
 def aggregation_factor(d_km, res_km):
@@ -627,11 +631,11 @@ def build_grid_case(case):
     print(f"Check  : native cell centres within {off_native[0]:.3f} km "
           f"(mean {off_native[1]:.3f}) of the file's xlat/xlon; verification "
           f"cells within {off_grid[0]:.3f} km (mean {off_grid[1]:.3f})")
-    if off_grid[0] > MAX_OFFSET_FRACTION * spec.res_km:
+    if off_grid[0] > MAX_OFFSET_KM:
         raise SystemExit(
             f"ERROR: the grid built from the attributes disagrees with the "
             f"file's own coordinates by {off_grid[0]:.2f} km "
-            f"(> {MAX_OFFSET_FRACTION * spec.res_km:.2f} km); the projection "
+            f"(> {MAX_OFFSET_KM:g} km); the projection "
             "assumptions need a look before anything is regridded")
     print(f"MET    : {spec.met_spec}")
 

@@ -12,7 +12,7 @@ import deployment_case as dc
 import obs_cases
 import stage4_hourly
 from obs_cases import (hourly_timestamps, check_cache_complete, mrms_s3_key,
-                       regrid_config, grid_shape_from_json, download_obs,
+                       regrid_config, grid_shape_from_json, read_grid_meta, download_obs,
                        regrid_obs)
 
 
@@ -39,10 +39,10 @@ def _touch_mrms(cache_dir, valid_dt):
     path.touch()
 
 
-def _write_grid_json(case, nx=150, ny=150):
+def _write_grid_json(case, nx=150, ny=150, res_km=6.0):
     case.grid_json_dir.mkdir(parents=True, exist_ok=True)
     case.grid_json_path.write_text(json.dumps({
-        "name": case.case_slug, "nx": nx, "ny": ny,
+        "name": case.case_slug, "nx": nx, "ny": ny, "res_km": res_km,
         "met_spec": f"lambert {nx} {ny} 29.0 -86.8 -82.25 6.0 6371.2 30.0 "
                     "60.0 N"}))
 
@@ -136,3 +136,34 @@ def test_download_obs_for_a_stage4_deployment_fetches_nothing(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "not fetched by this command" in out
     assert "nothing to fetch" in out
+
+
+def test_read_grid_meta_includes_the_resolution(tmp_path):
+    case = _case(tmp_path)
+    _write_grid_json(case, nx=150, ny=140, res_km=6.0)
+    assert read_grid_meta(case.grid_json_path) == {"ny": 140, "nx": 150,
+                                                   "res_km": 6.0}
+
+
+def test_regrid_config_refuses_a_grid_json_of_another_resolution(tmp_path):
+    case = _case(tmp_path, res_km=3.0)
+    # a 3 km run reads <case>_3km_grid.json; if that file somehow holds a 6 km
+    # grid, regridding would write files labelled 3km on the wrong grid
+    _write_grid_json(case, res_km=6.0)
+    with pytest.raises(SystemExit) as err:
+        regrid_config(case)
+    assert "6 km grid" in str(err.value) and "3 km" in str(err.value)
+
+
+def test_a_3km_run_finds_its_own_grid_not_the_6km_one(tmp_path):
+    six, three = _case(tmp_path), _case(tmp_path, res_km=3.0)
+    _write_grid_json(six, res_km=6.0)
+    with pytest.raises(SystemExit) as err:         # only the 6 km grid exists
+        regrid_config(three)
+    assert "build-grid" in str(err.value)
+    _write_grid_json(three, nx=300, ny=300, res_km=3.0)
+    cfg = regrid_config(three)
+    assert cfg.res_label == "3km"
+    assert cfg.output_path("stage4", datetime(2024, 9, 26, 1)).name == \
+        "2024092601_stage4_3km.nc"
+    assert regrid_config(six).res_label == "6km"

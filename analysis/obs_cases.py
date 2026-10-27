@@ -96,6 +96,14 @@ def regrid_config(case):
         raise SystemExit(f"ERROR: no grid for this deployment ({path}). "
                          "Run build-grid first:\n  python analysis/run.py "
                          "<yaml> build-grid") from None
+    # The files this run writes say the resolution in their names, so the grid
+    # behind them must really be that resolution.
+    res = read_grid_meta(path)["res_km"]
+    if abs(res - case.res_km) > 1e-6:
+        raise SystemExit(
+            f"ERROR: {path.name} is a {res:g} km grid but this run is "
+            f"{case.res_km:g} km. Run build-grid at {case.res_km:g} km first "
+            "(same --res-km).")
     settings = case.regrid
     return met_regrid.RegridConfig(
         cache_dir=case.regrid_dir, res_label=case.res_label,
@@ -229,11 +237,18 @@ def _native_hour(case, source, t, want_latlon):
         staging / f"stage4_{t:%Y%m%d%H}.grb2", msg)
 
 
-def grid_shape_from_json(path):
-    """(ny, nx) the grid JSON promises, to check MET's output against."""
+def read_grid_meta(path):
+    """{ny, nx, res_km} a grid JSON promises, to check against."""
     import json
     payload = json.loads(Path(path).read_text())
-    return int(payload["ny"]), int(payload["nx"])
+    return {"ny": int(payload["ny"]), "nx": int(payload["nx"]),
+            "res_km": float(payload["res_km"])}
+
+
+def grid_shape_from_json(path):
+    """(ny, nx) the grid JSON promises, to check MET's output against."""
+    meta = read_grid_meta(path)
+    return meta["ny"], meta["nx"]
 
 
 def regrid_obs(case):
