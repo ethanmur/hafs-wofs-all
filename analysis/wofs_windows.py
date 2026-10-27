@@ -1,22 +1,31 @@
-"""WoFS 3 h windows on the deployment's verification grid (plan step D3).
+"""WoFS 1 h and 3 h accumulations on the deployment's verification grid
+(plan step D3).
 
-For every complete (init, window) pair in the manifest:
+For every complete (init, window) pair in the D6 manifest:
 
-  1. Sum the 36 five-minute files that make up the window. `rain` is the
+  1. Sum the five-minute files natively, at WoFS's own 3 km. `rain` is the
      accumulation over the preceding 5 min, in inches, one file per step with
-     all members in it, so the window (start, end] is the sum of steps
+     all members in it, so a window (start, end] is the sum of steps
      s+1 .. s+36, where s is the step at the window start. Step 00 is the init
-     itself and is never used.
+     itself and is never used. Each file is read once and feeds the three 1 h
+     sums, and the 3 h sum is their total.
   2. Convert inches to mm.
-  3. Put it on the verification grid. At 6 km that grid is the WoFS grid
-     coarsened by whole 2 x 2 blocks, so each 6 km cell is exactly four WoFS
-     cells and the area-conserving regrid is the block mean. That is what
-     MET's budget method returns onto a nested grid, without 18 members x
-     ~160 windows of subprocess calls. At 3 km the grid is the native one and
-     nothing is averaged.
-  4. Write one NetCDF per (init, window) with an `ne` member dimension, in
-     MET's NetCDF convention so grid_stat can read it with
-     `level="(<member>,*,*)"`.
+  3. Regrid each accumulation onto the verification grid with MET's
+     `regrid_data_plane`, exactly as the obs are regridded: the same method and
+     width, the same grid spec. The 3 km sum is written to a MET-readable
+     NetCDF (the file layout and grid attributes copied from the WoFS file,
+     which MET already reads), and one call regrids all members at once, since
+     `-field` may be repeated and `-name` takes one output name per field.
+  4. Keep the result: 1 h files in `wofs_regrid_1h_dir` and 3 h files in
+     `wofs_regrid_3h_dir`, one per (init, hour or window), all members in it as
+     variables `rain_mm_m00` ... `rain_mm_m17`, so `grid_stat` reads a member
+     with `name="rain_mm_m03"; level="(*,*)"`.
+
+At 6 km each cell is exactly a 2 x 2 block of WoFS cells, so MET's budget
+method should return the plain block mean. That is checked, not assumed: every
+file is compared with a numpy block mean of the same sum and the difference is
+written to the budget CSV, so a MET result that disagrees with the arithmetic
+(a misread grid, a shifted cell edge) is flagged instead of trusted.
 
 A pair that is not complete is never partly summed: a 35-step total is not a
 3 h total and would bias every threshold. Existing outputs are reused, so a
@@ -27,21 +36,33 @@ Usage:
 """
 
 import csv
+import shutil
 import sys
 import time
+from datetime import timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np
 
+import accum_windows as aw
+import met_regrid
 import verification_grid as vg
 import window_manifest as wm
 import wofs_inventory as wi
 
 IN_TO_MM = 25.4
 VAR = "rain_mm"
-MET_MISSING = -9999.0
+STEPS_PER_HOUR = 60 // wi.STEP_MIN
+# MET's budget interpolation and numpy's block mean are the same arithmetic
+# on a nested grid, so anything beyond float noise is a real disagreement.
+MET_VS_BLOCK_TOL_MM = 0.01
+# The WoFS file's own grid description, copied into the staged input so MET
+# reads it the way it reads the original files.
+GRID_ATTR_KEYS = ("Projection", "scale_lat_1", "scale_lat_2", "lat_pin",
+                  "lon_pin", "x_pin", "y_pin", "lon_orient", "d_km", "r_km",
+                  "hemisphere", "nx", "ny")
 
 
 # =============================================================================
@@ -51,7 +72,24 @@ MET_MISSING = -9999.0
 def window_steps(init, window):
     """The step indices whose files make up `window` for a run from `init`."""
     start = int((window.start - init).total_seconds() // 60) // wi.STEP_MIN
-    return list(range(start + 1, start + 1 + wi.STEPS_PER_WINDOW))
+    n = int(round(window.hours * STEPS_PER_HOUR))
+    return list(range(start + 1, start + 1 + n))
+
+
+def hour_windows(window):
+    """The 1 h windows inside a window: (start, start+1], ..."""
+    return [aw.Window(window.start + timedelta(hours=k),
+                      window.start + timedelta(hours=k + 1))
+            for k in range(int(round(window.hours)))]
+
+
+def member_names(ne):
+    return [f"{VAR}_m{m:02d}" for m in range(ne)]
+
+
+def member_fields(ne):
+    """One MET -field string per member of the staged input."""
+    return [f'name="{VAR}"; level="({m},*,*)";' for m in range(ne)]
 
 
 def block_mean(field, n):
@@ -70,26 +108,6 @@ def block_mean(field, n):
     return shaped.mean(axis=(-3, -1))
 
 
-def sum_steps(files, steps, loader=None):
-    """Sum the `rain` field of the files for `steps`, in mm, float64.
-
-    Returns (total, nan_cells): NaN propagates through the sum, so a cell that
-    is missing in any step is missing in the window, and is counted.
-    """
-    loader = loader or load_rain
-    missing = [s for s in steps if s not in files]
-    if missing:
-        raise FileNotFoundError(
-            f"steps {missing[:5]}{'...' if len(missing) > 5 else ''} are not "
-            "on disk, so this window is not complete")
-    total = None
-    for step in steps:
-        field = np.asarray(loader(files[step]), dtype=np.float64)
-        total = field if total is None else total + field
-    total = total * IN_TO_MM
-    return total, int(np.isnan(total).sum())
-
-
 def load_rain(path):
     """The (ne, ny, nx) `rain` field of one WoFS file, in inches."""
     import xarray as xr
@@ -97,55 +115,137 @@ def load_rain(path):
         return ds["rain"].values
 
 
+def accumulate(files, init, window, loader=None):
+    """The window's accumulations at WoFS resolution, in mm.
+
+    Returns (hours, total, nan_cells): `hours` is one (ne, ny, nx) array per
+    hour of the window, `total` their sum. Each file is read once. NaN
+    propagates, so a cell missing in any step is missing in every accumulation
+    that includes it, and is counted.
+    """
+    loader = loader or load_rain
+    steps = window_steps(init, window)
+    missing = [s for s in steps if s not in files]
+    if missing:
+        raise FileNotFoundError(
+            f"steps {missing[:5]}{'...' if len(missing) > 5 else ''} are not "
+            "on disk, so this window is not complete")
+    hours = []
+    for k in range(0, len(steps), STEPS_PER_HOUR):
+        acc = None
+        for step in steps[k:k + STEPS_PER_HOUR]:
+            field = np.asarray(loader(files[step]), dtype=np.float64)
+            acc = field if acc is None else acc + field
+        hours.append(acc * IN_TO_MM)
+    total = hours[0].copy()
+    for h in hours[1:]:
+        total = total + h
+    nan_cells = int(sum(np.isnan(h).sum() for h in hours))
+    return hours, total, nan_cells
+
+
 # =============================================================================
-# Output
+# MET
 # =============================================================================
 
-def write_window_netcdf(path, spec, data_mm, lat, lon, init, window,
-                        n_steps, source_files):
-    """One (init, window): all members, mm, on the grid, MET-readable."""
+def native_grid_attrs(attrs):
+    """The grid-describing global attributes of a WoFS file."""
+    return {k: attrs[k] for k in GRID_ATTR_KEYS if k in attrs}
+
+
+def write_native_input(path, data_mm, grid_attrs):
+    """The 3 km sum as a MET-readable NetCDF: `rain_mm(ne, lat, lon)`.
+
+    Laid out like the WoFS files MET already reads: dimensions lat and lon, no
+    coordinate variables, and the grid carried in the global attributes.
+    """
     import netCDF4
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     ne, ny, nx = data_mm.shape
-    tmp = path.with_name(path.stem + ".tmp.nc")
-    values = np.where(np.isfinite(data_mm), data_mm, MET_MISSING)
-    with netCDF4.Dataset(tmp, "w") as nc:
+    with netCDF4.Dataset(path, "w") as nc:
         nc.createDimension("ne", ne)
         nc.createDimension("lat", ny)
         nc.createDimension("lon", nx)
-        nc.createVariable("lat", "f4", ("lat", "lon"))[:] = lat
-        nc.createVariable("lon", "f4", ("lat", "lon"))[:] = lon
         var = nc.createVariable(VAR, "f4", ("ne", "lat", "lon"),
-                                fill_value=MET_MISSING)
-        var[:] = values
-        var.long_name = "WoFS 3 h accumulated rainfall, one field per member"
+                                fill_value=np.float32(np.nan))
+        var[:] = data_mm.astype("f4")
+        var.long_name = "WoFS accumulated rainfall, one field per member"
         var.units = "mm"
-        for key, value in vg.met_grid_attrs(spec).items():
+        for key, value in grid_attrs.items():
             setattr(nc, key, value)
-        nc.init_time = f"{init:%Y%m%d_%H%M%S}"
-        nc.window_start = f"{window.start:%Y%m%d_%H%M%S}"
-        nc.window_end = f"{window.end:%Y%m%d_%H%M%S}"
-        nc.valid_time = f"{window.end:%Y%m%d_%H%M%S}"
-        nc.n_steps = n_steps
-        nc.source_units = "in (5-min accumulation), summed then x 25.4"
-        nc.source_first_file = Path(source_files[0]).name
-        nc.source_last_file = Path(source_files[-1]).name
-    tmp.replace(path)
     return path
 
 
-def read_window(path):
-    """(ne, ny, nx) mm from a file written here; NaN where missing."""
+def read_window(path, ne=None):
+    """(ne, ny, nx) mm from a file written by `regrid_one`; NaN where
+    missing."""
     import netCDF4
     with netCDF4.Dataset(path) as nc:
-        data = np.ma.filled(nc.variables[VAR][:], np.nan)
-    return np.asarray(data, dtype=np.float64)
+        names = sorted(n for n in nc.variables if n.startswith(f"{VAR}_m"))
+        if ne is not None and len(names) != ne:
+            raise ValueError(f"{path} has {len(names)} members, expected {ne}")
+        fields = [np.ma.filled(nc.variables[n][:].astype(float), np.nan)
+                  for n in names]
+    out = np.stack(fields)
+    out[out <= met_regrid.MET_MISSING + 1] = np.nan
+    return out
+
+
+def regrid_one(tool, cfg, data_mm, grid_attrs, out_path, init, end, hours):
+    """Regrid one (ne, ny, nx) accumulation with MET to `out_path`."""
+    ne = data_mm.shape[0]
+    staged = write_native_input(
+        cfg.staging_dir / f"{out_path.stem}_native.nc", data_mm, grid_attrs)
+    met_regrid.run_regrid(tool, staged, cfg.grid_spec, out_path,
+                          member_fields(ne), cfg, names=member_names(ne))
+    # Kept on failure (run_regrid raises first): the staged input is what you
+    # inspect when MET rejects a file.
+    staged.unlink(missing_ok=True)
+    import netCDF4
+    with netCDF4.Dataset(out_path, "a") as nc:
+        nc.init_time = f"{init:%Y%m%d_%H%M%S}"
+        nc.valid_time = f"{end:%Y%m%d_%H%M%S}"
+        nc.accumulation_hours = hours
+        nc.members = ne
+        nc.source_units = "in (5-min accumulation), summed then x 25.4"
+    return out_path
 
 
 # =============================================================================
 # Driver
 # =============================================================================
+
+def _config(case, hours, spec_string, name):
+    s = case.regrid
+    return met_regrid.RegridConfig(
+        cache_dir=case.wofs_regrid_dir(hours), grid_spec=spec_string,
+        grid_name=name or case.case_slug, res_label=case.res_label,
+        method=s.method, width=s.width, vld_thresh=s.vld_thresh,
+        tolerance_pct=s.tolerance_pct, met_bin_dir=s.met_bin_dir)
+
+
+def _row(product, init, end, status, data, native, n, nan_cells):
+    ens_mean = np.nanmean(data, axis=0)
+    row = {"product": product, "end": f"{end:%Y-%m-%d %H:%M}",
+           "init": f"{init:%Y-%m-%d %H:%M}", "status": status,
+           "members": data.shape[0], "nan_cells": nan_cells,
+           "regrid_mean_mm": round(float(np.nanmean(data)), 5),
+           "ens_mean_max_mm": round(float(np.nanmax(ens_mean)), 3),
+           "native_mean_mm": "", "mean_pct_diff": "",
+           "met_vs_block_max_mm": "", "flag": ""}
+    if native is None:
+        return row
+    nm, rm = float(np.nanmean(native)), float(np.nanmean(data))
+    pct = 0.0 if nm == 0 else 100.0 * (rm - nm) / nm
+    diff = float(np.nanmax(np.abs(data - block_mean(native, n))))
+    row.update({"native_mean_mm": round(nm, 5),
+                "mean_pct_diff": f"{pct:+.3f}%",
+                "met_vs_block_max_mm": round(diff, 5),
+                "flag": ("CHECK" if (nan_cells or diff > MET_VS_BLOCK_TOL_MM)
+                         else "")})
+    return row
+
 
 def regrid_wofs_case(case):
     """Driver for `regrid-wofs`."""
@@ -154,6 +254,7 @@ def regrid_wofs_case(case):
         raise SystemExit("regrid-wofs: no complete WoFS window for this "
                          "deployment, so there is nothing to regrid")
     try:
+        spec_string, grid_name = met_regrid.read_grid_json(case.grid_json_path)
         spec = vg.grid_spec_from_json(case.grid_json_path)
     except FileNotFoundError as err:
         raise SystemExit(f"ERROR: {err}") from None
@@ -161,73 +262,77 @@ def regrid_wofs_case(case):
         raise SystemExit(f"ERROR: {case.grid_json_path.name} is a "
                          f"{spec.res_km:g} km grid but this run is "
                          f"{case.res_km:g} km. Run build-grid first.")
-    lat, lon = vg.grid_latlon(spec)
 
     manifest = wm.build_manifest(case)
-    n = vg.aggregation_factor(float(manifest.dep.attrs["d_km"]), case.res_km)
-    pairs = wm.wofs_complete_pairs(manifest.rows)
-    init_dirs = {i.init_dt: i.path for i in manifest.dep.inits}
+    dep = manifest.dep
+    n = vg.aggregation_factor(float(dep.attrs["d_km"]), case.res_km)
+    grid_attrs = native_grid_attrs(dep.attrs)
+    pairs = sorted(wm.wofs_complete_pairs(manifest.rows),
+                   key=lambda p: (p[1].end, p[0]))
+    init_dirs = {i.init_dt: i.path for i in dep.inits}
+    cfgs = {h: _config(case, h, spec_string, grid_name) for h in (1, 3)}
     print(f"Grid   : {spec.nx} x {spec.ny} @ {spec.res_km:g} km  "
-          f"({n} x {n} WoFS cells each)")
+          f"({n} x {n} WoFS cells each); MET {cfgs[3].method}, width "
+          f"{cfgs[3].width}")
     print(f"Pairs  : {len(pairs)} complete (init, window) pairs in "
-          f"{len(manifest.windows)} windows  ->  {case.wofs_regrid_dir}",
-          flush=True)
+          f"{len(manifest.windows)} windows")
+    print(f"Output : {case.wofs_regrid_1h_dir}\n         "
+          f"{case.wofs_regrid_3h_dir}", flush=True)
     if not pairs:
         print("Nothing to do.")
-        return []
+        return {1: [], 3: []}
 
-    rows, started = [], time.monotonic()
-    for i, (init, window) in enumerate(sorted(pairs, key=lambda p: (p[1].end,
-                                                                    p[0])), 1):
-        out = case.wofs_window_path(window.end, init)
-        steps = window_steps(init, window)
-        if out.exists():
-            data = read_window(out)
-            rows.append(_row(init, window, "cached", steps, data, None))
-            status = "cached"
-        else:
+    tool = met_regrid.met_tool("regrid_data_plane", cfgs[3].met_bin_dir)
+    for h in (1, 3):
+        met_regrid.resolve_to_grid(cfgs[h])        # records / checks settings
+    rows = {1: [], 3: []}
+    started = time.monotonic()
+    for i, (init, window) in enumerate(pairs, 1):
+        todo = [(3, window.end, window)] + [
+            (1, hw.end, hw) for hw in hour_windows(window)]
+        fresh = [t for t in todo
+                 if not case.wofs_window_path(t[1], init, t[0]).exists()]
+        native = hours_native = nan_cells = None
+        if fresh:
             files = wi.step_files(init_dirs[init])
-            native, nan_cells = sum_steps(files, steps)
-            coarse = block_mean(native, n)
-            write_window_netcdf(out, spec, coarse, lat, lon, init, window,
-                                len(steps), [files[steps[0]], files[steps[-1]]])
-            rows.append(_row(init, window, "regridded", steps, coarse,
-                             native, nan_cells))
-            status = "regridded"
-        r = rows[-1]
-        print(f"  [{i:>3}/{len(pairs)}] {window.end:%Y-%m-%d %HZ} "
-              f"init {init:%d %H%M}  {status:<9} members {r['members']}  "
-              f"ens-mean max {r['ens_mean_max_mm']:.1f} mm  "
-              f"{r['mean_pct_diff']}  (+{time.monotonic() - started:.0f}s)",
+            hours_native, native, nan_cells = accumulate(files, init, window)
+        statuses = []
+        for hrs, end, win in todo:
+            out = case.wofs_window_path(end, init, hrs)
+            if (hrs, end, win) in fresh:
+                src = native if hrs == 3 else hours_native[
+                    hour_windows(window).index(win)]
+                regrid_one(tool, cfgs[hrs], src, grid_attrs,
+                           out, init, end, hrs)
+                data = read_window(out, ne=src.shape[0])
+                rows[hrs].append(_row(f"{hrs}h", init, end, "regridded", data,
+                                      src, n, nan_cells if hrs == 3 else 0))
+                statuses.append("regridded")
+            else:
+                data = read_window(out)
+                rows[hrs].append(_row(f"{hrs}h", init, end, "cached", data,
+                                      None, n, 0))
+                statuses.append("cached")
+        last = rows[3][-1]
+        print(f"  [{i:>3}/{len(pairs)}] {window.end:%Y-%m-%d %HZ} init "
+              f"{init:%d %H%M}  3h {statuses[0]:<9} 1h x{len(statuses) - 1} "
+              f"{statuses[1]:<9} ens-mean max {last['ens_mean_max_mm']:.1f} mm"
+              f"  {last['mean_pct_diff']}  (+{time.monotonic() - started:.0f}s)",
               flush=True)
 
-    csv_path = case.wofs_budget_csv_path
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(csv_path, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
-        w.writeheader()
-        w.writerows(rows)
-    bad = [r for r in rows if r["flag"]]
-    print(f"\nSaved conservation check: {csv_path}")
-    print(f"{len(rows) - len(bad)} of {len(rows)} windows clean"
-          + (f"; {len(bad)} flagged (NaN cells or mass change)" if bad else "."))
+    for hrs in (1, 3):
+        path = case.wofs_budget_csv_path(hrs)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(rows[hrs][0]))
+            w.writeheader()
+            w.writerows(rows[hrs])
+        bad = [r for r in rows[hrs] if r["flag"]]
+        print(f"\n{hrs} h: {len(rows[hrs]) - len(bad)} of {len(rows[hrs])} "
+              f"clean" + (f"; {len(bad)} flagged (NaN cells, or MET differing "
+                          f"from the block mean by > {MET_VS_BLOCK_TOL_MM} mm)"
+                          if bad else ".") + f"  ->  {path}")
+    for h in (1, 3):                 # kept only if a MET call failed (raised)
+        shutil.rmtree(cfgs[h].cache_dir / "_staging", ignore_errors=True)
     return rows
 
-
-def _row(init, window, status, steps, coarse, native, nan_cells=0):
-    ens_mean = np.nanmean(coarse, axis=0)
-    row = {"window_end": f"{window.end:%Y-%m-%d %H:%M}",
-           "init": f"{init:%Y-%m-%d %H:%M}", "status": status,
-           "n_steps": len(steps), "members": coarse.shape[0],
-           "nan_cells": nan_cells,
-           "regrid_mean_mm": round(float(np.nanmean(coarse)), 5),
-           "ens_mean_max_mm": round(float(np.nanmax(ens_mean)), 3)}
-    if native is None:
-        row.update({"native_mean_mm": "", "mean_pct_diff": "", "flag": ""})
-        return row
-    nm, rm = float(np.nanmean(native)), float(np.nanmean(coarse))
-    pct = 0.0 if nm == 0 else 100.0 * (rm - nm) / nm
-    row.update({"native_mean_mm": round(nm, 5),
-                "mean_pct_diff": f"{pct:+.3f}%",
-                "flag": "CHECK" if (nan_cells or abs(pct) > 0.1) else ""})
-    return row

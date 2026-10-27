@@ -86,14 +86,23 @@ def met_tool(name, bin_dir=None):
     return Path(found)
 
 
-def regrid_command(tool, input_path, grid_path, out_path, field_spec, config):
-    return [str(tool), str(input_path), str(grid_path), str(out_path),
-            "-field", field_spec,
-            "-method", config.method,
-            "-width", str(config.width),
-            "-vld_thresh", str(config.vld_thresh),
-            "-name", OUTPUT_NAME,
-            "-v", "2"]
+def regrid_command(tool, input_path, grid_path, out_path, field_spec, config,
+                   names=None):
+    """The regrid_data_plane argv. `field_spec` is one field string, or a list
+    of them: MET takes -field repeatedly and one -name entry per field, so a
+    whole ensemble goes through in a single call."""
+    fields = [field_spec] if isinstance(field_spec, str) else list(field_spec)
+    names = list(names) if names else [OUTPUT_NAME]
+    if len(names) != len(fields):
+        raise ValueError(f"{len(fields)} fields but {len(names)} output names")
+    cmd = [str(tool), str(input_path), str(grid_path), str(out_path)]
+    for spec in fields:
+        cmd += ["-field", spec]
+    return cmd + ["-method", config.method,
+                  "-width", str(config.width),
+                  "-vld_thresh", str(config.vld_thresh),
+                  "-name", ",".join(names),
+                  "-v", "2"]
 
 
 def _tmp_path(path):
@@ -143,12 +152,19 @@ def _met_failure(summary, cmd, proc):
     return f"{summary}:\n  {shlex.join(cmd)}\n  " + "\n  ".join(log[-20:])
 
 
-def run_regrid(tool, input_path, grid_path, out_path, field_spec, config):
-    """Run regrid_data_plane, writing out_path only on a usable result."""
+def run_regrid(tool, input_path, grid_path, out_path, field_spec, config,
+               names=None):
+    """Run regrid_data_plane, writing out_path only on a usable result.
+
+    With several fields (and `names`), every output variable must have data:
+    an ensemble member that comes back entirely missing is a failed regrid,
+    not a dry member (dry is zero, not missing)."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _tmp_path(out_path)
-    cmd = regrid_command(tool, input_path, grid_path, tmp, field_spec, config)
+    cmd = regrid_command(tool, input_path, grid_path, tmp, field_spec, config,
+                         names)
+    check = list(names) if names else [OUTPUT_NAME]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0 or not tmp.exists():
@@ -156,7 +172,7 @@ def run_regrid(tool, input_path, grid_path, out_path, field_spec, config):
                 f"regrid_data_plane failed (exit {proc.returncode})", cmd, proc))
         # MET can exit 0 having found no usable source data (e.g. a grid it
         # misread), leaving an all-missing field that must not be cached.
-        if valid_value_count(tmp) == 0:
+        if any(valid_value_count(tmp, n) == 0 for n in check):
             # Keep the rejected output; it is the other half of the evidence.
             kept = out_path.with_suffix(".all-missing.nc")
             tmp.replace(kept)

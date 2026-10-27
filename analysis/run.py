@@ -18,10 +18,12 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 (including cycles HAFS never ran), and per window whether it is
                 testable, wofs_only or no_wofs. Writes two CSVs to
                 <manifest_dir>; reads only directory listings and file headers
-  regrid-wofs   for every complete (WoFS init, window): sum the 36 five-minute
-                files, convert in -> mm, coarsen to the verification grid, and
-                write one NetCDF per (init, window) with all members to
-                <wofs_regrid_dir>; needs build-grid to have run
+  regrid-wofs   for every complete (WoFS init, window): sum the 5-minute files
+                natively, convert in -> mm, regrid with MET onto the
+                verification grid (one call per file, all members), and keep
+                the 1 h and 3 h accumulations in <wofs_regrid_1h_dir> and
+                <wofs_regrid_3h_dir>; each is checked against the exact block
+                mean. Needs build-grid and `module load met`
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself

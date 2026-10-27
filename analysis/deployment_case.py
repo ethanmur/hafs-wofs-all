@@ -19,14 +19,14 @@ TRUTH_SOURCES = ("stage4", "mrms")
 TOP_KEYS = {"storm_name", "storm_id", "deployment", "best_track",
             "truth_source", "wofs", "valid_start", "valid_end", "hafs",
             "grid_json_dir", "grid_plot_dir", "regrid_dir", "regrid_plot_dir",
-            "mask_dir", "mask_plot_dir", "manifest_dir", "wofs_regrid_dir",
-            "log_dir", "mrms_cache_dir",
+            "mask_dir", "mask_plot_dir", "manifest_dir", "wofs_regrid_1h_dir",
+            "wofs_regrid_3h_dir", "log_dir", "mrms_cache_dir",
             "stage4_cache_dir", "grid", "regrid", "regrid_plots", "masks"}
 # Where each kind of file goes. Similar files sit together, flat, under
 # data/ or figures/; there is no per-case output folder.
 PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "regrid_dir",
              "regrid_plot_dir", "mask_dir", "mask_plot_dir", "manifest_dir",
-             "wofs_regrid_dir", "log_dir")
+             "wofs_regrid_1h_dir", "wofs_regrid_3h_dir", "log_dir")
 MASK_KEYS = {"coast_buffer_km", "ne_scale"}
 WOFS_KEYS = {"root", "available", "complete_windows"}
 HAFS_KEYS = {"lookback_h", "min_members", "init_start", "init_end", "models"}
@@ -98,7 +98,8 @@ class DeploymentCase:
     mask_dir: Path             # data/obs-valid-masks/   <case>_obs_valid.nc
     mask_plot_dir: Path        # figures/obs-valid-masks/ <case>_obs_valid.png
     manifest_dir: Path         # data/window-manifests/ <case>_manifest.csv, _windows.csv
-    wofs_regrid_dir: Path      # data/wofs-regrid/<dep>_<storm>/  WoFS 3 h windows
+    wofs_regrid_1h_dir: Path   # data/wofs-regrid-1h/<dep>_<storm>/  WoFS 1 h accumulations
+    wofs_regrid_3h_dir: Path   # data/wofs-regrid-3h/<dep>_<storm>/  WoFS 3 h accumulations
     log_dir: Path              # data/logs/
     mrms_cache_dir: Path
     stage4_cache_dir: Path
@@ -156,15 +157,22 @@ class DeploymentCase:
     def window_summary_path(self):
         return self.manifest_dir / f"{self.case_slug}_windows.csv"
 
-    def wofs_window_path(self, window_end, init):
-        """One WoFS (init, window): all members, summed and on the grid."""
-        return self.wofs_regrid_dir / (
-            f"{window_end:%Y%m%d%H}_i{init:%Y%m%d%H%M}_wofs_{self.res_label}.nc")
+    def wofs_regrid_dir(self, hours):
+        """The folder for 1 h or 3 h WoFS accumulations."""
+        if hours not in (1, 3):
+            raise ValueError("WoFS accumulations are kept for 1 h and 3 h")
+        return self.wofs_regrid_1h_dir if hours == 1 else self.wofs_regrid_3h_dir
 
-    @property
-    def wofs_budget_csv_path(self):
-        """The WoFS conservation check, beside the windows it describes."""
-        return self.wofs_regrid_dir / (
+    def wofs_window_path(self, end, init, hours=3):
+        """One WoFS (init, accumulation ending at `end`): all members, summed
+        and on the grid. The folder says 1 h or 3 h; the name says which hour
+        or window ends, which run it came from, and the resolution."""
+        return self.wofs_regrid_dir(hours) / (
+            f"{end:%Y%m%d%H}_i{init:%Y%m%d%H%M}_wofs_{self.res_label}.nc")
+
+    def wofs_budget_csv_path(self, hours=3):
+        """The WoFS regrid check, beside the files it describes."""
+        return self.wofs_regrid_dir(hours) / (
             f"regrid_budget_{self.valid_start:%Y%m%d%H}_"
             f"{self.valid_end:%Y%m%d%H}{self.res_suffix}.csv")
 
@@ -263,7 +271,8 @@ def from_yaml(path, res_km=None):
         mask_dir=Path(cfg["mask_dir"]),
         mask_plot_dir=Path(cfg["mask_plot_dir"]),
         manifest_dir=Path(cfg["manifest_dir"]),
-        wofs_regrid_dir=Path(cfg["wofs_regrid_dir"]),
+        wofs_regrid_1h_dir=Path(cfg["wofs_regrid_1h_dir"]),
+        wofs_regrid_3h_dir=Path(cfg["wofs_regrid_3h_dir"]),
         masks=MaskSettings(
             coast_buffer_km=float(masks.get("coast_buffer_km", 150.0)),
             ne_scale=str(masks.get("ne_scale", "50m"))),

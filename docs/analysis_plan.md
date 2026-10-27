@@ -68,7 +68,7 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   | regridded-obs maps, `stats-regrid` figures and CSVs | `figures/regrid-obs-tests/<deployment>_<storm>/` |
   | observation-validity masks (`<case>_obs_valid.nc`), their maps | `data/obs-valid-masks/`, `figures/obs-valid-masks/` |
   | window manifests (`<case>_manifest.csv`, `<case>_windows.csv`) | `data/window-manifests/` |
-  | WoFS 3 h windows (`<windowEnd>_i<init>_wofs_6km.nc`) and their conservation CSV | `data/wofs-regrid/<deployment>_<storm>/` |
+  | WoFS 1 h and 3 h accumulations (`<end>_i<init>_wofs_6km.nc`, one variable per member) and their check CSV | `data/wofs-regrid-1h/<deployment>_<storm>/`, `data/wofs-regrid-3h/<deployment>_<storm>/` |
   | run logs | `data/logs/` |
   | raw downloads | `data/mrms/`, `data/stage-iv/` |
   | model inputs | `data/wofs-full/`, `data/hafs/` |
@@ -77,7 +77,7 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   figures into a `figures/<kind>/` folder, named for the case. The destinations
   are explicit keys in each case YAML (`grid_json_dir`, `grid_plot_dir`,
   `regrid_dir`, `regrid_plot_dir`, `mask_dir`, `mask_plot_dir`, `manifest_dir`,
-  `wofs_regrid_dir`, `log_dir`).
+  `wofs_regrid_1h_dir`, `wofs_regrid_3h_dir`, `log_dir`).
 
   **Resolution.** 6 km is the default and adds nothing to any name, so every
   default path above is exactly as written. Another resolution (`grid.res_km` in
@@ -574,42 +574,54 @@ A1b. D6 combines them.
 *Check:* unit tests: the clock is anchored at 00Z for any `valid_start`, partial
 windows at both ends are dropped, leads read as `f003` / `f02:30`.
 
-### D3. WoFS 3 h windows on the deployment grid (`wofs_windows.py`)
+### D3. WoFS 1 h and 3 h accumulations on the deployment grid (`wofs_windows.py`)
 
     python analysis/run.py storms/<case>.yaml regrid-wofs [--res-km N]
 
-For every complete (init, window) pair in the D6 manifest, in one pass:
+For every complete (init, window) pair in the D6 manifest:
 
-1. Sum the 36 five-minute files of the window. `rain` is a per-interval
-   accumulation in inches, one file per step holding all 18 members, so the
-   window is the sum of steps `s+1 .. s+36`; no differencing is needed, and
-   step 00 (the init itself) is never used.
-2. Convert inches to mm (x 25.4).
-3. Put it on the grid. At 6 km each cell is exactly a 2 x 2 block of WoFS cells,
-   so the area-conserving regrid is the **block mean**, which is what MET's
-   budget method returns onto a nested grid, without 18 members x ~160 windows
-   of subprocess calls. At 3 km the grid is native and nothing is averaged.
-   NaN in any cell of a block makes the coarse cell NaN.
-4. Write one NetCDF per (init, window), all members in it, to `wofs_regrid_dir`
-   (`data/wofs-regrid/<deployment>_<storm>/`):
-   `<windowEnd YYYYMMDDHH>_i<init YYYYMMDDHHMM>_wofs_6km.nc`, variable `rain_mm`
-   with dimensions `(ne, lat, lon)`, in MET's NetCDF grid convention so
-   `grid_stat` can read a member with `level="(<member>,*,*)"`.
+1. **Sum natively, at 3 km.** `rain` is a per-interval accumulation in inches,
+   one file per step holding all 18 members, so a window is the sum of steps
+   `s+1 .. s+36`; no differencing is needed, and step 00 (the init itself) is
+   never used. Each file is read once and feeds the three 1 h sums; the 3 h sum
+   is their total. Convert inches to mm (x 25.4). NaN in any step propagates.
+2. **Regrid each accumulation with MET**, the same operator as the obs:
+   `regrid_data_plane` with the case's method and width (BUDGET, width 2) onto
+   the grid spec from the grid JSON. The 3 km sum is staged as a NetCDF laid out
+   like the WoFS files MET already reads (no coordinate arrays, the grid in the
+   global attributes, copied from the WoFS file). One call regrids every member,
+   since `-field` may be repeated and `-name` takes one output name per field
+   (confirmed in the MET documentation). That is four calls per (init, window):
+   the 3 h file and three 1 h files, about 640 for the Helene-sized set across
+   all deployments.
+3. **Keep both**, in separate folders per deployment, `<deployment>_<storm>`:
+   `data/wofs-regrid-1h/` and `data/wofs-regrid-3h/`, each file
+   `<end YYYYMMDDHH>_i<init YYYYMMDDHHMM>_wofs_6km.nc` (`end` is the hour or
+   window end). Members are variables `rain_mm_m00` ... `rain_mm_m17`, so
+   `grid_stat` reads one with `name="rain_mm_m03"; level="(*,*)"`. The 1 h files
+   exist for hours inside complete 3 h windows only, so the manifest still
+   decides what exists; the three 1 h files of a window add up to its 3 h file.
 
 A pair that is not `complete` is never partly summed: a 35-step total is not a
 3 h total and would bias every threshold, the same reason a missing obs hour
 makes an obs window missing. Existing outputs are reused, so a rerun does only
-what is missing.
+what is missing. If MET proves too costly, the block-mean route (below) is the
+fallback, and the check shows it would give the same answer.
 
-*Check:* `regrid_budget_<start>_<end>.csv` beside the files, one row per window:
-domain-mean change from coarsening (zero to rounding for a block mean; flagged
-above 0.1%), NaN cells (flagged if any) and the ensemble-mean maximum. Still to
-confirm on the cluster: MET reads a member back,
-`plot_data_plane <file> out.ps 'name="rain_mm"; level="(0,*,*)";'`, and one
-window agrees with `regrid_data_plane` BUDGET run on the same sum.
+*Check:* `regrid_budget_<start>_<end>.csv` beside the files in each folder, one
+row per accumulation. At 6 km each cell is exactly a 2 x 2 block of WoFS cells,
+so MET's budget method should return the plain block mean, and that is
+**verified, not assumed**: each file is compared with a numpy block mean of the
+same sum, the largest difference goes in `met_vs_block_max_mm`, and anything
+over 0.01 mm is flagged `CHECK`, as is any NaN cell. The domain-mean change
+from coarsening is recorded too.
 
-*MET:* none to produce the windows; `regrid_data_plane` only for that one-off
-validation.
+*To confirm on the cluster:* MET reads the staged input (the first MET call on
+the Helene pilot says so; on failure the staged file is kept for
+`plot_data_plane <file> out.ps 'name="rain_mm"; level="(0,*,*)";'`), and the
+output reads back as `name="rain_mm_m03"; level="(*,*)"`.
+
+*MET:* `regrid_data_plane`.
 
 ### D4. HAFS 3 h windows on the deployment grid (`hafs_windows.py`)
 `regrid_data_plane` takes `-field 'name="APCP"; level="A3";'` and selects the

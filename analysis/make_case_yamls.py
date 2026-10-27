@@ -111,7 +111,9 @@ def path_lines(storm_name, deployment, orion=ORION):
         f"regrid_plot_dir: {orion}/figures/regrid-obs-tests/"
         f"{deployment}_{storm_name.lower()}/",
         f"manifest_dir:    {orion}/data/window-manifests/",
-        f"wofs_regrid_dir: {orion}/data/wofs-regrid/"
+        f"wofs_regrid_1h_dir: {orion}/data/wofs-regrid-1h/"
+        f"{deployment}_{storm_name.lower()}/",
+        f"wofs_regrid_3h_dir: {orion}/data/wofs-regrid-3h/"
         f"{deployment}_{storm_name.lower()}/",
         f"mask_dir:        {orion}/data/obs-valid-masks/",
         f"mask_plot_dir:   {orion}/figures/obs-valid-masks/",
