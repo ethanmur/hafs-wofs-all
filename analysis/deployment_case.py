@@ -19,12 +19,13 @@ TRUTH_SOURCES = ("stage4", "mrms")
 TOP_KEYS = {"storm_name", "storm_id", "deployment", "best_track",
             "truth_source", "wofs", "valid_start", "valid_end", "hafs",
             "grid_json_dir", "grid_plot_dir", "regrid_dir", "regrid_plot_dir",
-            "log_dir", "mrms_cache_dir", "stage4_cache_dir", "grid",
-            "regrid", "regrid_plots"}
+            "mask_dir", "mask_plot_dir", "log_dir", "mrms_cache_dir",
+            "stage4_cache_dir", "grid", "regrid", "regrid_plots", "masks"}
 # Where each kind of file goes. Similar files sit together, flat, under
 # data/ or figures/; there is no per-case output folder.
 PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "regrid_dir",
-             "regrid_plot_dir", "log_dir")
+             "regrid_plot_dir", "mask_dir", "mask_plot_dir", "log_dir")
+MASK_KEYS = {"coast_buffer_km", "ne_scale"}
 WOFS_KEYS = {"root", "available", "complete_windows"}
 HAFS_KEYS = {"lookback_h", "min_members", "init_start", "init_end", "models"}
 GRID_KEYS = {"res_km"}
@@ -58,6 +59,14 @@ def _resolution_dir(path, res_km):
 
 
 @dataclass
+class MaskSettings:
+    """The observation-validity rule: how far past US land the truth product
+    is trusted, and which Natural Earth scale draws the coast."""
+    coast_buffer_km: float = 150.0
+    ne_scale: str = "50m"
+
+
+@dataclass
 class RegridSettings:
     """How regrid-obs runs MET. `sources` empty means just the truth product."""
     sources: tuple = ()
@@ -84,6 +93,8 @@ class DeploymentCase:
     grid_plot_dir: Path        # figures/regrid-wofs/    <case>_grid.png
     regrid_dir: Path           # data/stage-iv-regrid/<dep>_<storm>/  regridded obs + CSV
     regrid_plot_dir: Path      # figures/regrid-obs-tests/<dep>_<storm>/
+    mask_dir: Path             # data/obs-valid-masks/   <case>_obs_valid.nc
+    mask_plot_dir: Path        # figures/obs-valid-masks/ <case>_obs_valid.png
     log_dir: Path              # data/logs/
     mrms_cache_dir: Path
     stage4_cache_dir: Path
@@ -96,6 +107,7 @@ class DeploymentCase:
     hafs_models: dict = field(default_factory=dict)
     res_km: float = DEFAULT_RES_KM
     regrid: RegridSettings = field(default_factory=RegridSettings)
+    masks: MaskSettings = field(default_factory=MaskSettings)
     regrid_panels: tuple = ()               # empty = every panel
 
     @property
@@ -119,6 +131,16 @@ class DeploymentCase:
     @property
     def grid_plot_path(self):
         return self.grid_plot_dir / f"{self.case_slug}{self.res_suffix}_grid.png"
+
+    @property
+    def mask_path(self):
+        """The observation-validity mask, on this deployment's grid."""
+        return self.mask_dir / f"{self.case_slug}{self.res_suffix}_obs_valid.nc"
+
+    @property
+    def mask_plot_path(self):
+        return self.mask_plot_dir / (
+            f"{self.case_slug}{self.res_suffix}_obs_valid.png")
 
     @property
     def folder_name(self):
@@ -181,6 +203,10 @@ def from_yaml(path, res_km=None):
     _unknown(regrid, REGRID_KEYS, "regrid")
     plots = cfg.get("regrid_plots") or {}
     _unknown(plots, PLOT_KEYS, "regrid_plots")
+    masks = cfg.get("masks") or {}
+    _unknown(masks, MASK_KEYS, "masks")
+    if float(masks.get("coast_buffer_km", 150.0)) < 0:
+        raise ValueError("masks.coast_buffer_km cannot be negative")
     panels = tuple(str(v) for v in (plots.get("panels") or ()))
     bad = [k for k in panels if k not in PLOT_PANELS]
     if bad:
@@ -208,6 +234,11 @@ def from_yaml(path, res_km=None):
         grid_plot_dir=Path(cfg["grid_plot_dir"]),
         regrid_dir=Path(cfg["regrid_dir"]),
         regrid_plot_dir=_resolution_dir(Path(cfg["regrid_plot_dir"]), res),
+        mask_dir=Path(cfg["mask_dir"]),
+        mask_plot_dir=Path(cfg["mask_plot_dir"]),
+        masks=MaskSettings(
+            coast_buffer_km=float(masks.get("coast_buffer_km", 150.0)),
+            ne_scale=str(masks.get("ne_scale", "50m"))),
         log_dir=Path(cfg["log_dir"]),
         mrms_cache_dir=Path(cfg["mrms_cache_dir"]),
         stage4_cache_dir=Path(cfg["stage4_cache_dir"]),

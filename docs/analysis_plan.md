@@ -32,6 +32,8 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   best-track center from the domain, whether it is inside, and the percent of
   domain cells within 500 km of it. Later analysis splits "mostly TC" from
   "little TC" windows on these columns; none of that splits the statistics now.
+  The diagnostics are computed in G3, when that analysis is done: they need only
+  the best track, the grid JSON and the window times.
 - **Observation validity mask.** Stage IV and MRMS have no truth offshore or
   where radar coverage fades, and those cells would count as zero rainfall.
   Cells outside the validity region are excluded from every statistic. The
@@ -64,6 +66,7 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   | grid sanity maps (`<case>_grid.png`) | `figures/regrid-wofs/` |
   | regridded obs (`<YYYYMMDDHH>_<source>_6km.nc`), their conservation CSV and settings guard | `data/stage-iv-regrid/<deployment>_<storm>/` |
   | regridded-obs maps, `stats-regrid` figures and CSVs | `figures/regrid-obs-tests/<deployment>_<storm>/` |
+  | observation-validity masks (`<case>_obs_valid.nc`), their maps | `data/obs-valid-masks/`, `figures/obs-valid-masks/` |
   | run logs | `data/logs/` |
   | raw downloads | `data/mrms/`, `data/stage-iv/` |
   | model inputs | `data/wofs-full/`, `data/hafs/` |
@@ -71,7 +74,7 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   Later phases follow the same rule: data products into a `data/<kind>/` folder,
   figures into a `figures/<kind>/` folder, named for the case. The destinations
   are explicit keys in each case YAML (`grid_json_dir`, `grid_plot_dir`,
-  `regrid_dir`, `regrid_plot_dir`, `log_dir`).
+  `regrid_dir`, `regrid_plot_dir`, `mask_dir`, `mask_plot_dir`, `log_dir`).
 
   **Resolution.** 6 km is the default and adds nothing to any name, so every
   default path above is exactly as written. Another resolution (`grid.res_km` in
@@ -124,8 +127,8 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
 
 - Probability-matched means and ensemble verification (WoFS 18-member, lagged
   HAFS ensembles from several cycles of one configuration).
-- Splitting statistics by storm proximity (the diagnostics are collected from
-  the start; the analysis is later).
+- Splitting statistics by storm proximity, including computing the proximity
+  diagnostics (G3).
 - Object-based verification (MODE/MTD), designed deliberately later.
 - TC-RMW storm-relative composites.
 - Track and intensity error (TC-Pairs).
@@ -420,55 +423,66 @@ per-deployment case; their modules stay on disk meanwhile.
 
 ---
 
-## Phase C — Validity region and storm-proximity diagnostics
+## Phase C — Observation-validity mask
 
-### C0. Delete: track swath and WoFS-box masks
-Remove `track_swath_mask`, `wofs_box_mask`, `WOFS_ANY`, `active_verify_mask`
-and the multi-region composition in `masks.py`, with their tests and the
-`build-masks` figures that drew them. The domain is the grid, so these are
-empty operations.
+### C0. Delete: track swath, WoFS-box masks and the old grid configuration
+The verification region is the whole WoFS domain, so the masks built for the old
+scope are empty operations and go: the 500 km track swath, the per-deployment
+WoFS boxes and their union, the per-window mask composition (`active_verify_mask`),
+the multi-region figure, and the `build-masks` / `plot-masked` commands. With
+them go the best-track grid configuration (`GridConfig`, `pad_km`,
+`mask_radius_km`, `WofsDomain`, `trim_track`) in `verification_grid.py`, which
+only the old case loader read. `masks.py` now holds the validity mask alone.
 
-*Check:* `masks.py` contains only the validity mask; tests pass.
+*Check:* `masks.py` has one mask; `verification_grid.py` has only the WoFS-domain
+grid; no module imports a deleted name; tests pass.
 
 ### C1. Observation validity mask
-Rasterize Natural Earth US-state polygons onto the deployment grid,
-distance-transform, keep everything within 150 km of US land, then cut land
-masses not connected to the US. The buffer reaches 150 km into Canada and
-Mexico and stops, since radar range does not end at a political line but
-coverage fades inland. The connectivity test (not a country list) keeps Cuba,
-Hispaniola and the Bahamas out while keeping Long Island, the Keys and the
-barrier islands in.
 
-The rule is a function of `truth_source`, so MRMS can substitute its own
-region without touching callers. The cell count of the valid fraction prints
-once per deployment: a WoFS box can be mostly ocean, and `FULL` in Phase E is
-`full domain ∩ obs_valid`, or the statistics are computed over cells with no
-truth.
+    python analysis/run.py storms/<case>.yaml build-mask
 
-*Caveat:* the NetCDF's MET Lambert attributes are written from MET's
-convention, east-positive. Verified readable with
-`plot_data_plane <mask>.nc /tmp/m.ps 'name="obs_valid"; level="(*,*)";'`; the
-fallback if MET rejects it is to write the field as GRIB2 through
-`regrid_data_plane`.
+Stage IV and MRMS are CONUS products and have no truth offshore beyond radar
+range, so cells outside their coverage must not be scored. The mask is True where
+the truth can be trusted: within `masks.coast_buffer_km` (150) of US land, with
+land masses not connected to the US cut. Rasterize Natural Earth US-state
+polygons onto the deployment grid, distance-transform in cells scaled by the grid
+spacing (valid because the grid is Lambert at a near-constant km spacing), keep
+everything within the buffer, then cut land masses not connected to US land. The
+US land border is the only thing the buffer measures from, and water and foreign
+soil follow the same rule: the buffer reaches 150 km into Canada and Mexico and
+stops, since radar range does not end at a political line but coverage does fade
+inland. The connectivity test (not a country list) keeps Cuba, Hispaniola and
+the Bahamas out while keeping Long Island, the Keys and the barrier islands in.
 
-*Check:* the valid fraction per deployment; map of the valid region.
+The verification region for every statistic is therefore **the whole domain
+intersected with this mask**. It is written as `<case>_obs_valid.nc` (variable
+`obs_valid`) to `data/obs-valid-masks/` with a map in
+`figures/obs-valid-masks/`, both named for the case and, at a non-default
+resolution, with its label (`..._3km_obs_valid.nc`). The rule is the Stage IV
+one; MRMS has the same CONUS footprint, so one mask serves both for now, and a
+different MRMS rule would become a function of `truth_source` without touching
+callers. The valid fraction prints once per deployment, because a WoFS box over
+water can be mostly outside it: Helene `20240927_d1` is 92% valid.
+
+`stats-regrid` adds a `valid` variant (every distribution and pair restricted to
+the mask) when this file exists.
+
+*Caveat:* the NetCDF's MET Lambert global attributes are written from MET's
+convention, east-positive longitudes per the A2 lesson. Verified readable with
+`plot_data_plane <mask>.nc /tmp/m.ps 'name="obs_valid"; level="(*,*)";'`; if MET
+ever rejects it, the fallback is writing the field as GRIB2 through
+`regrid_data_plane` so MET writes the NetCDF itself.
+
+*Check:* the valid fraction per deployment, and the map: US land, the water
+buffer, and any foreign land and cut islands visibly where expected.
 
 *MET:* `gen_vx_mask` has no polygon-buffer type; Python is simpler and the
 output feeds `grid_stat` natively.
 
-### C2. Storm-proximity diagnostics
-For each valid window, from the NHC best track (b-deck): distance from the TC
-center to the domain center, a flag for whether the center is inside the
-domain, and the percent of obs-valid domain cells within 500 km of the center.
-The track is interpolated to the window midpoint; the fraction is computed in
-the deployment's projected plane so 500 km is a true constant radius.
-
-These are a diagnostic table consumed by D6. They never mask anything.
-
-*Check:* storm clearly in the box -> high fraction, storm far away -> near 0;
-the fraction varies smoothly as the storm crosses a deployment.
-
-*MET:* none.
+*Moved:* the storm-proximity diagnostics that used to be C2 are Phase G3. They
+stratify the statistics but do not build or filter any gridded data, and they
+need only the best track, the grid JSON and the window times, so they can be
+computed whenever that analysis is done, with no rework of anything earlier.
 
 ---
 
@@ -477,7 +491,7 @@ the fraction varies smoothly as the storm crosses a deployment.
 ### D0. Delete: HAFS case configuration and ATCF parsing for the old scope
 Replace `hafs_case.py` (StormCase with `domain`, `mask_radius_km`,
 per-initialization fields) by the per-deployment case from A1. Keep only the
-ATCF/b-deck parsing that A3 and C2 use, and move it beside `best_track.py`.
+ATCF/b-deck parsing that A3 uses, and move it beside `best_track.py`.
 
 *Check:* one case class; tests pass.
 
@@ -646,8 +660,8 @@ forecast being wrong, which is the thing being measured.
 
 ### D6. Window manifest
 A CSV inventory of every `(model, deployment, run id, member, init,
-window_start, window_end, lead_h, status)` plus the C2 proximity columns,
-before any statistics run. WoFS rows carry the A1 status (`complete`,
+window_start, window_end, lead_h, status)`, before any statistics run; the
+proximity columns join it in G3. WoFS rows carry the A1 status (`complete`,
 `missing_steps`, `short_run`, `no_files`) and HAFS rows carry the D4 source
 status, so every window a deployment was expected to supply is accounted for:
 served, or missing with a reason. HAFS rows carry the member count per
@@ -664,7 +678,7 @@ as strange scores later.
 ## Phase E — Statistics
 
 ### E0. Delete: remaining swath/radius references
-Remove `mask_radius_km`, `swath` and the `SWATH`/`WOFS` mask names from every
+Check that `mask_radius_km`, `swath` and the `SWATH`/`WOFS` mask names are gone from every
 config, schema and plotting default. Search the repo for each.
 
 *Check:* grep finds none; tests pass.
@@ -693,8 +707,8 @@ Three pairings per window, all on the same cells:
 
 ### E3. Parse into the long CSV schema
 Columns: `storm, deployment, model, run_id, member, init, valid_time,
-window_h, lead_h, mask, threshold_mm, scale_km, stat_name, value`, plus the C2
-proximity columns carried on each row (or joined by window).
+window_h, lead_h, mask, threshold_mm, scale_km, stat_name, value`; the G3
+proximity columns join by window when that analysis is done.
 
 `lead_h` per model makes matched-lead comparison and the HAFS
 initialization-degradation test (HAFS f24–f27 vs WoFS f00–f03, same valid
@@ -739,8 +753,13 @@ Colorblind-safe palettes throughout (Okabe-Ito; no red/green pairings).
 - **G1.** Probability-matched mean of WoFS members; verify it as a field.
 - **G2.** WoFS ensemble and lagged HAFS ensemble (several cycles of one
   configuration, valid at the same window); `gen_ens_prod`, `ensemble_stat`.
-- **G3.** Stratify by the C2 proximity columns: do "mostly TC" and "little TC"
-  windows diverge?
+- **G3.** Storm-proximity stratification: for each valid window, from the NHC
+  best track (b-deck) interpolated to the window midpoint, the distance from the
+  TC center to the domain center, whether the center is inside the domain, and
+  the percent of obs-valid domain cells within 500 km of it (computed in the
+  deployment's projected plane so 500 km is a true constant radius). Then ask
+  whether "mostly TC" and "little TC" windows diverge. These need no model data,
+  so they join the manifest and the statistics tables whenever this is done.
 - **G4.** MRMS sensitivity: repeat E on `truth_source: mrms`.
 - **G5.** Mixing HAFS-A and HAFS-B as an explicit experiment.
 

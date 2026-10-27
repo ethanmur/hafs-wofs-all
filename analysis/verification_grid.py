@@ -7,210 +7,13 @@ their native Lambert conformal grid (300 x 300 cells at 3 km, 900 km square),
 and coarsened by whole 2 x 2 blocks to 6 km, so each 6 km cell is exactly four
 WoFS cells. Each deployment has its own grid; a storm can have several.
 
-The "legacy case configuration" block below (GridConfig, WofsDomain, ...) is
-what the old best-track grid builder read. It stays only while obs_cases.py
-and masks.py still import it, and goes with them in plan steps B0 and C0.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
-
-# =============================================================================
-# Legacy case configuration (removed with obs_cases.py / masks.py, steps B0/C0)
-# =============================================================================
 
 DEFAULT_RES_KM = 6.0
-DEFAULT_PAD_KM = 750.0
-DEFAULT_MASK_RADIUS_KM = 500.0
-DEFAULT_MARGIN_H = 6
-DEFAULT_MAX_CELLS = 800
-
-
-@dataclass
-class GridConfig:
-    """Geometry of one case's verification grid."""
-    res_km: float = DEFAULT_RES_KM
-    pad_km: float = DEFAULT_PAD_KM
-    mask_radius_km: float = DEFAULT_MASK_RADIUS_KM
-    margin_h: int = DEFAULT_MARGIN_H     # track kept either side of the window
-    max_cells: int = DEFAULT_MAX_CELLS   # guard on Nx and Ny
-    std_parallels: Optional[tuple] = None    # override the derived parallels
-    domain_override: Optional[tuple] = None  # (lat_min, lat_max, lon_*, lon_*)
-    name: Optional[str] = None               # grid id used in cache paths
-
-    @property
-    def grid_name(self):
-        """Identity for cache paths; keeps resolutions from mixing on disk."""
-        return self.name or f"lambert{self.res_km:g}km"
-
-
-def _domain_tuple(value, key):
-    """Validate a [lat_min, lat_max, lon_min, lon_max] box."""
-    if value is None:
-        return None
-    if len(value) != 4:
-        raise ValueError(f"{key} must be "
-                         "[lat_min, lat_max, lon_min, lon_max]")
-    lat0, lat1, lon0, lon1 = (float(v) for v in value)
-    if lat0 >= lat1 or lon0 >= lon1:
-        raise ValueError(f"{key} must be ordered "
-                         "[lat_min, lat_max, lon_min, lon_max]")
-    return (lat0, lat1, lon0, lon1)
-
-
-def parse_stamp(value, key, where=""):
-    """Optional YYYYMMDDHH (or YYYYMMDDHHMM) timestamp from a YAML value."""
-    from datetime import datetime
-    if value in (None, ""):
-        return None
-    text = str(value)
-    fmt = "%Y%m%d%H%M" if len(text) == 12 else "%Y%m%d%H"
-    try:
-        return datetime.strptime(text, fmt)
-    except ValueError:
-        suffix = f" in {where}" if where else ""
-        raise ValueError(f"'{key}' must be YYYYMMDDHH{suffix}, "
-                         f"got {value!r}") from None
-
-
-@dataclass
-class WofsDomain:
-    """One WoFS deployment: a box, and the period it was actually running.
-
-    WoFS is re-sited between events, so a storm can have several deployments
-    in different places on different days. The grid takes the union of them,
-    but each stays a separate statistics mask applied only inside its own time
-    window -- masking day-3 statistics with a box that was live on day 1 would
-    score HAFS in a region WoFS never covered.
-    """
-    domain: tuple                  # (lat_min, lat_max, lon_min, lon_max)
-    name: str = "wofs"
-    valid_start: Optional[object] = None    # datetime, or None for always-on
-    valid_end: Optional[object] = None
-
-    def covers(self, when):
-        """Is this deployment live at `when`? Untimed boxes always are."""
-        if self.valid_start is not None and when < self.valid_start:
-            return False
-        if self.valid_end is not None and when > self.valid_end:
-            return False
-        return True
-
-    @property
-    def label(self):
-        if self.valid_start is None and self.valid_end is None:
-            return self.name
-        lo = f"{self.valid_start:%m-%d %HZ}" if self.valid_start else "..."
-        hi = f"{self.valid_end:%m-%d %HZ}" if self.valid_end else "..."
-        return f"{self.name}  {lo}-{hi}"
-
-
-def wofs_domains_from_cfg(cfg, where=""):
-    """Read `wofs_domains:` (a list) or the `wofs_domain:` shorthand.
-
-    A list entry is either a bare [lat_min, lat_max, lon_min, lon_max] box or
-    a mapping with `domain` plus optional `name`, `valid_start`, `valid_end`.
-    """
-    cfg = cfg or {}
-    if "wofs_domains" in cfg and "wofs_domain" in cfg:
-        raise ValueError("give either wofs_domain or wofs_domains, not both")
-    if cfg.get("wofs_domain") is not None:
-        return [WofsDomain(domain=_domain_tuple(cfg["wofs_domain"],
-                                                "wofs_domain"))]
-    entries = cfg.get("wofs_domains") or []
-    if isinstance(entries, dict):
-        entries = [entries]
-    out = []
-    for i, entry in enumerate(entries, start=1):
-        default_name = f"wofs_{i}"
-        if isinstance(entry, dict):
-            unknown = set(entry) - {"domain", "name", "valid_start",
-                                    "valid_end"}
-            if unknown:
-                raise ValueError("unknown wofs_domains keys: "
-                                 + ", ".join(sorted(unknown)))
-            if "domain" not in entry:
-                raise ValueError(f"wofs_domains[{i}] needs a 'domain'")
-            box = _domain_tuple(entry["domain"], f"wofs_domains[{i}].domain")
-            start = parse_stamp(entry.get("valid_start"),
-                                f"wofs_domains[{i}].valid_start", where)
-            end = parse_stamp(entry.get("valid_end"),
-                              f"wofs_domains[{i}].valid_end", where)
-            if start is not None and end is not None and end <= start:
-                raise ValueError(f"wofs_domains[{i}] valid_end must be after "
-                                 "valid_start")
-            out.append(WofsDomain(domain=box,
-                                  name=str(entry.get("name", default_name)),
-                                  valid_start=start, valid_end=end))
-        else:
-            out.append(WofsDomain(
-                domain=_domain_tuple(entry, f"wofs_domains[{i}]"),
-                name=default_name))
-    names = [d.name for d in out]
-    if len(set(names)) != len(names):
-        raise ValueError(f"duplicate wofs_domains names: {names}")
-    return out
-
-
-def active_domains(domains, when):
-    """The deployments live at a given valid time."""
-    return [d for d in domains if d.covers(when)]
-
-
-def grid_config_from_dict(cfg):
-    """Build a GridConfig from a YAML `verification_grid:` block.
-
-    Returns the defaults when the block is absent, so a case YAML needs the
-    block only to deviate from them.
-    """
-    cfg = cfg or {}
-    unknown = set(cfg) - {"res_km", "pad_km", "mask_radius_km", "margin_h",
-                          "max_cells", "std_parallels", "domain_override",
-                          "name"}
-    if unknown:
-        raise ValueError("unknown verification_grid keys: "
-                         + ", ".join(sorted(unknown)))
-    res_km = float(cfg.get("res_km", DEFAULT_RES_KM))
-    pad_km = float(cfg.get("pad_km", DEFAULT_PAD_KM))
-    mask_radius_km = float(cfg.get("mask_radius_km",
-                                   DEFAULT_MASK_RADIUS_KM))
-    margin_h = int(cfg.get("margin_h", DEFAULT_MARGIN_H))
-    max_cells = int(cfg.get("max_cells", DEFAULT_MAX_CELLS))
-    if res_km <= 0:
-        raise ValueError("verification_grid.res_km must be positive")
-    if mask_radius_km <= 0:
-        raise ValueError("verification_grid.mask_radius_km must be positive")
-    if pad_km < mask_radius_km:
-        raise ValueError(
-            f"verification_grid.pad_km ({pad_km:g} km) must be at least "
-            f"mask_radius_km ({mask_radius_km:g} km), or the statistics swath "
-            "would extend past the edge of the grid")
-    if margin_h < 0:
-        raise ValueError("verification_grid.margin_h cannot be negative")
-    if max_cells <= 0:
-        raise ValueError("verification_grid.max_cells must be positive")
-    parallels = cfg.get("std_parallels")
-    if parallels is not None:
-        if len(parallels) != 2:
-            raise ValueError("verification_grid.std_parallels must be "
-                             "[lat1, lat2]")
-        parallels = tuple(float(v) for v in parallels)
-        if parallels[0] >= parallels[1]:
-            raise ValueError("verification_grid.std_parallels must be "
-                             "increasing")
-    return GridConfig(
-        res_km=res_km,
-        pad_km=pad_km,
-        mask_radius_km=mask_radius_km,
-        margin_h=margin_h,
-        max_cells=max_cells,
-        std_parallels=parallels,
-        domain_override=_domain_tuple(cfg.get("domain_override"),
-                                      "verification_grid.domain_override"),
-        name=cfg.get("name"),
-    )
 
 
 # =============================================================================
@@ -305,19 +108,6 @@ def _transformer(proj, inverse=False):
     return pyproj.Transformer.from_crs(a, b, always_xy=True)
 
 
-def trim_track(track, valid_start, valid_end, margin_h):
-    """Track points inside the valid window, widened by margin_h either side.
-
-    The grid follows the *scoring* window, not the cycle range: a forecast
-    initialized days earlier is still only verified inside this window, so its
-    earlier positions must not inflate the domain.
-    """
-    from datetime import timedelta
-    lo = valid_start - timedelta(hours=margin_h)
-    hi = valid_end + timedelta(hours=margin_h)
-    return [p for p in track if lo <= p[0] <= hi]
-
-
 def grid_latlon(spec):
     """(lat, lon) 2-D arrays of the grid points, shape (ny, nx)."""
     import numpy as np
@@ -374,6 +164,25 @@ def grid_to_dict(spec, report=None, extra=None):
     if extra:
         out.update(extra)
     return out
+
+
+def grid_spec_from_json(path):
+    """The GridSpec build-grid wrote to `path`."""
+    import json
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no grid at {path}; run build-grid first:\n"
+            "  python analysis/run.py <yaml> build-grid")
+    payload = json.loads(path.read_text())
+    return GridSpec(
+        name=payload.get("name", "grid"), nx=int(payload["nx"]),
+        ny=int(payload["ny"]), res_km=float(payload["res_km"]),
+        lat_0=float(payload["lat_0"]), lon_0=float(payload["lon_0"]),
+        lat_1=float(payload["lat_1"]), lat_2=float(payload["lat_2"]),
+        lat_ll=float(payload["lat_ll"]), lon_ll=float(payload["lon_ll"]),
+        x_ll_km=float(payload["x_ll_km"]), y_ll_km=float(payload["y_ll_km"]),
+        source=payload.get("source", ""))
 
 
 def write_grid_json(path, payload):

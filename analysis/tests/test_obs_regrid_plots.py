@@ -64,7 +64,8 @@ def _case(tmp):
         truth_source="stage4", wofs_root=tmp / "w" / "2024_BERYL" / "d",
         wofs_available=True, complete_windows=1,
         grid_json_dir=tmp / "j", grid_plot_dir=tmp / "g",
-        regrid_dir=tmp / "rg", regrid_plot_dir=tmp / "p", log_dir=tmp / "l",
+        regrid_dir=tmp / "rg", regrid_plot_dir=tmp / "p",
+        mask_dir=tmp / "m2", mask_plot_dir=tmp / "mp", log_dir=tmp / "l",
         mrms_cache_dir=tmp / "m", stage4_cache_dir=tmp / "s",
         valid_start=datetime(2024, 9, 24, 0), valid_end=datetime(2024, 9, 24, 3))
 

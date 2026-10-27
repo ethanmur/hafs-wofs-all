@@ -35,6 +35,12 @@ def test_parse_args_res_km_option_anywhere():
             pass
 
 
+def test_build_mask_is_a_command():
+    assert "build-mask" in run.COMMANDS
+    assert run.parse_args(["c.yaml", "build-mask"]) == ("c.yaml", "build-mask",
+                                                        None)
+
+
 def test_parse_args_rejects_unknown_command():
     try:
         run.parse_args(["case.yaml", "bogus"])

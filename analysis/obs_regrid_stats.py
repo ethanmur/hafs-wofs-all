@@ -10,11 +10,13 @@ Per hour and for the whole scored period, into case.regrid_plot_dir:
   distributions/dist_<variant>_combined.png, one-to-one/oneone_<variant>_combined.png
   stats_sources_<case>.csv, stats_pairs_<case>.csv
 
-`variant` is "all": every cell a product reports. Each product's distribution
+`variant` is "all" (every cell a product reports) or "valid" (those cells
+inside the validity mask). Each product's distribution
 uses its own valid cells and the pair uses the cells where both report. Dry
 cells (< 0.1 mm) are left out of the distributions and reported as a dry
-fraction instead. A variant restricted to the observation-validity region is
-added with that mask in plan step C.
+fraction instead. When build-mask has run, a second variant "valid" restricts
+every distribution and pair to the observation-validity region, which is the
+region the real statistics are computed over.
 
 The window-combined figures come from histograms accumulated hour by hour,
 never from a pooled point cloud, so memory stays flat over a long window.
@@ -268,6 +270,14 @@ def stats_regrid(case):
     oc._print_case_header(case, "Stats on regridded obs", sources)
 
     variants = ["all"]
+    valid = _load_valid_mask(case)
+    if valid is not None:
+        variants.append("valid")
+        print(f"Validity mask: {int(valid.sum()):,} of {valid.size:,} cells "
+              f"({100 * valid.mean():.1f}%) -- adds the 'valid' variant")
+    else:
+        print(f"No validity mask at {case.mask_path.name} (run build-mask) "
+              "-- 'all' variant only.")
     pairs = list(itertools.combinations(sources, 2))
     out = case.regrid_plot_dir
     print(f"Regrid cache: {cfg.cache_dir}")
@@ -289,7 +299,7 @@ def stats_regrid(case):
         fields = {s: met_regrid.read_regridded(cfg.output_path(s, t))[2]
                   for s in sources}
         for variant in variants:
-            mask = None
+            mask = valid if variant == "valid" else None
             hour_src = {s: SourceStats() for s in sources}
             hour_pair = {p: PairStats() for p in pairs}
             for s in sources:
@@ -355,5 +365,15 @@ def stats_regrid(case):
     print(f"\nFigures under {out}/distributions and {out}/one-to-one")
 
 
+def _load_valid_mask(case):
+    """The case's observation-validity mask as booleans, or None if
+    build-mask has not been run."""
+    import masks
+    if not case.mask_path.exists():
+        return None
+    return masks.read_mask(case.mask_path)
+
+
 def _variant_note(variant):
-    return "every cell each product reports"
+    return ("inside the observation-validity mask" if variant == "valid"
+            else "every cell each product reports")

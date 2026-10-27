@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 
-from obs_regrid_stats import (BIN_EDGES, MIN_RAIN_MM, PairStats, SourceStats,
+from obs_regrid_stats import (_load_valid_mask, _variant_note, BIN_EDGES, MIN_RAIN_MM, PairStats, SourceStats,
                               _pair_points, _points, hist_percentile)
 
 _RNG = np.random.default_rng(7)
@@ -96,3 +96,26 @@ def _run_all():
 
 if __name__ == "__main__":
     _run_all()
+
+
+def test_valid_variant_needs_the_mask_file_and_reads_it(tmp_path):
+    import masks
+    import verification_grid as vg
+    from test_verification_grid import HELENE_ATTRS
+
+    class _Case:
+        mask_path = tmp_path / "x_obs_valid.nc"
+
+    assert _load_valid_mask(_Case()) is None          # build-mask not run yet
+    spec = vg.wofs_grid_spec(HELENE_ATTRS, 6.0)
+    lat, lon = vg.grid_latlon(spec)
+    valid = np.zeros((spec.ny, spec.nx), dtype=bool)
+    valid[:, :40] = True
+    masks.write_mask_netcdf(_Case.mask_path, spec, valid, lat, lon)
+    got = _load_valid_mask(_Case())
+    assert got.dtype == bool and (got == valid).all()
+
+
+def test_variant_notes_say_which_cells_are_counted():
+    assert "validity mask" in _variant_note("valid")
+    assert "every cell" in _variant_note("all")

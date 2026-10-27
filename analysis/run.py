@@ -8,6 +8,10 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 written to <grid_json_dir>/<case>_grid.json with the MET grid
                 spec, plus a sanity map in grid_plot_dir (grid outline, best
                 track by ATCF status)
+  build-mask    the observation-validity mask on that grid: where Stage IV /
+                MRMS can be trusted (US land plus 150 km, detached land cut),
+                written as a MET NetCDF to <mask_dir> with a map in
+                <mask_plot_dir>; needs build-grid to have run
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself
@@ -22,14 +26,15 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 caches only
   stats-regrid  distributions and cell-by-cell 1:1 comparison of the two
                 regridded products, per hour and over the whole period, plus
-                stats CSVs (needs both products regridded)
+                stats CSVs (needs both products regridded); adds a variant
+                restricted to the validity mask when build-mask has run
 
 Resolution is 6 km unless a case sets grid.res_km or the run passes --res-km;
 only a non-default resolution adds its label to output names, so the default
 run's files never move.
 
-The masking, window-listing and HAFS commands return with the plan steps that
-rebuild them on this case format (see docs/analysis_plan.md, phases C and D).
+The window-listing and HAFS commands return with the plan steps that rebuild
+them on this case format (see docs/analysis_plan.md, phase D).
 """
 
 import sys
@@ -37,8 +42,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-COMMANDS = ("build-grid", "download-obs", "regrid-obs", "plot-regrid",
-            "stats-regrid")
+COMMANDS = ("build-grid", "build-mask", "download-obs", "regrid-obs",
+            "plot-regrid", "stats-regrid")
 
 
 def parse_args(argv):
@@ -70,6 +75,9 @@ def dispatch(case, command):
     if command == "build-grid":
         from verification_grid import build_grid_case
         return build_grid_case(case)
+    if command == "build-mask":
+        from masks import build_mask_case
+        return build_mask_case(case)
     if command == "download-obs":
         import obs_cases
         return obs_cases.download_obs(case)

@@ -25,6 +25,7 @@ def _case(tmp_path, **overrides):
         wofs_available=True, complete_windows=3,
         grid_json_dir=tmp_path / "json", grid_plot_dir=tmp_path / "gplots",
         regrid_dir=tmp_path / "rg", regrid_plot_dir=tmp_path / "plots",
+        mask_dir=tmp_path / "masks", mask_plot_dir=tmp_path / "mplots",
         log_dir=tmp_path / "logs", mrms_cache_dir=tmp_path / "mrms",
         stage4_cache_dir=tmp_path / "st4",
         valid_start=datetime(2024, 9, 26, 0), valid_end=datetime(2024, 9, 26, 2))

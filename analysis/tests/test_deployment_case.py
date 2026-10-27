@@ -166,3 +166,30 @@ def test_yaml_grid_block_sets_the_resolution_and_the_override_wins(tmp_path):
     path = _write(tmp_path, dict(_generated(GOOD), grid={"res_km": 3.0}))
     assert dc.from_yaml(path).res_km == 3.0
     assert dc.from_yaml(path, res_km=6.0).res_km == 6.0
+
+
+def test_mask_paths_follow_the_flat_layout_and_the_resolution_rule(tmp_path):
+    path = _write(tmp_path, _generated(GOOD))
+    six = dc.from_yaml(path)
+    root = "/work2/noaa/aoml-hafs1/emurray/ppgc-hafs"
+    assert six.mask_path == Path(
+        f"{root}/data/obs-valid-masks/2024_02l_beryl_20240708_d1_obs_valid.nc")
+    assert six.mask_plot_path == Path(
+        f"{root}/figures/obs-valid-masks/2024_02l_beryl_20240708_d1_obs_valid.png")
+    three = dc.from_yaml(path, res_km=3.0)
+    assert three.mask_path.name == "2024_02l_beryl_20240708_d1_3km_obs_valid.nc"
+    assert three.mask_path != six.mask_path
+
+
+def test_mask_settings_default_and_validate(tmp_path):
+    case = dc.from_yaml(_write(tmp_path, _generated(GOOD)))
+    assert case.masks.coast_buffer_km == 150.0 and case.masks.ne_scale == "50m"
+    cfg = dict(_generated(GOOD), masks={"coast_buffer_km": 100, "ne_scale": "10m"})
+    case = dc.from_yaml(_write(tmp_path, cfg))
+    assert case.masks.coast_buffer_km == 100.0 and case.masks.ne_scale == "10m"
+    with pytest.raises(ValueError):
+        dc.from_yaml(_write(tmp_path, dict(_generated(GOOD),
+                                           masks={"coast_buffer_km": -1})))
+    with pytest.raises(ValueError):
+        dc.from_yaml(_write(tmp_path, dict(_generated(GOOD),
+                                           masks={"swath_km": 500})))
