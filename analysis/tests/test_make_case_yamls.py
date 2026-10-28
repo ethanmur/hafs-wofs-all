@@ -50,6 +50,9 @@ def test_rendered_available_case_parses_with_expected_keys():
     assert cfg["storm_id"] == "2024-02l" and cfg["truth_source"] == "stage4"
     assert cfg["valid_start"] == 2024070818 and cfg["valid_end"] == 2024070821
     assert cfg["wofs"]["available"] is True
+    assert cfg["regrid"]["sources"] == ["stage4", "mrms"]
+    assert cfg["stage4_regrid_dir"].endswith("/data/stage-iv-regrid/20240708_d1_beryl/")
+    assert cfg["mrms_regrid_dir"].endswith("/data/mrms-regrid/20240708_d1_beryl/")
     assert cfg["hafs"]["lookback_h"] == 48
     assert cfg["hafs"]["min_members"] == 8
     assert set(cfg["hafs"]["models"]) == {"HFSA", "HFSB"}
@@ -92,3 +95,10 @@ def test_main_writes_one_file_per_deployment(tmp_path):
     assert sorted(p.name for p in out.glob("*.yaml")) == [
         "2023_10l_idalia_20230830_d1.yaml",
         "2024_02l_beryl_20240708_d1.yaml"]
+
+
+def test_obs_sources_can_be_restricted_to_stage_iv():
+    inv = {"storm": "2024_BERYL", "deployment": "20240708_d1"}
+    case = mc.build_case(inv, [_win("2024-07-08 1800Z", "2024-07-08 2100Z")])
+    cfg = yaml.safe_load(mc.render_case(case, obs_sources=("stage4",)))
+    assert cfg["regrid"]["sources"] == ["stage4"]

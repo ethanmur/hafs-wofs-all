@@ -106,7 +106,9 @@ def regrid_config(case):
             "(same --res-km).")
     settings = case.regrid
     return met_regrid.RegridConfig(
-        cache_dir=case.regrid_dir, res_label=case.res_label,
+        cache_dir=case.regrid_dir_for(case.regrid_sources[0]),
+        source_dirs={s: case.regrid_dir_for(s) for s in case.regrid_sources},
+        res_label=case.res_label,
         grid_spec=spec, grid_name=name or case.case_slug,
         method=settings.method, width=settings.width,
         vld_thresh=settings.vld_thresh, tolerance_pct=settings.tolerance_pct,
@@ -268,7 +270,8 @@ def regrid_obs(case):
     print(f"  to_grid {grid_desc}")
     print(f"Method:   {cfg.method} (width {cfg.width}, "
           f"vld_thresh {cfg.vld_thresh})")
-    print(f"Cache:    {cfg.cache_dir}", flush=True)
+    for source in sources:
+        print(f"Cache:    {source:<6} -> {cfg.dir_for(source)}", flush=True)
 
     staging = cfg.staging_dir
     timestamps = hourly_timestamps(case.valid_start, case.valid_end)
@@ -325,13 +328,16 @@ def regrid_obs(case):
               + "  ".join(notes)
               + f"  (+{time.monotonic() - started:.0f}s)", flush=True)
 
-    out_csv = case.budget_csv_path
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_csv, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
-        w.writeheader()
-        w.writerows(rows)
-    print(f"\nSaved conservation check: {out_csv}")
+    # One CSV per product, beside the files it describes.
+    for source in sources:
+        mine = [r for r in rows if r["source"] == source]
+        out_csv = case.budget_csv_path(source)
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_csv, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(mine[0].keys()))
+            w.writeheader()
+            w.writerows(mine)
+        print(f"\nSaved conservation check ({source}): {out_csv}")
     flagged = [r for r in rows if r["flag"]]
     if not flagged:
         print(f"All {len(rows)} source-hours within {cfg.tolerance_pct}%.")

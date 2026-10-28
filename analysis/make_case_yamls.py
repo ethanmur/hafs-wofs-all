@@ -28,6 +28,7 @@ HAFS_CYCLE_H = 6
 HAFS_LOOKBACK_H = 48
 HAFS_MIN_MEMBERS = 8
 HAFS_MODELS = ("HFSA", "HFSB")
+OBS_SOURCES = ("stage4", "mrms")
 
 # WoFS archive folder -> (HAFS storm id, display name, b-deck file)
 STORMS = {
@@ -106,7 +107,9 @@ def path_lines(storm_name, deployment, orion=ORION):
     return [
         f"grid_json_dir:   {orion}/data/json-grids/",
         f"grid_plot_dir:   {orion}/figures/regrid-wofs/",
-        f"regrid_dir:      {orion}/data/stage-iv-regrid/"
+        f"stage4_regrid_dir: {orion}/data/stage-iv-regrid/"
+        f"{deployment}_{storm_name.lower()}/",
+        f"mrms_regrid_dir: {orion}/data/mrms-regrid/"
         f"{deployment}_{storm_name.lower()}/",
         f"regrid_plot_dir: {orion}/figures/regrid-obs-tests/"
         f"{deployment}_{storm_name.lower()}/",
@@ -123,7 +126,16 @@ def path_lines(storm_name, deployment, orion=ORION):
     ]
 
 
-def render_case(case, orion=ORION):
+def obs_lines(obs_sources=OBS_SOURCES):
+    """The regrid block: which obs products regrid-obs handles. Stage IV is the
+    truth product; MRMS alongside it is the sensitivity check."""
+    return ["# Obs products regridded onto the grid (truth_source is the one",
+            "# the anomaly maps and comparisons are measured against).",
+            "regrid:",
+            f"  sources: [{', '.join(obs_sources)}]"]
+
+
+def render_case(case, orion=ORION, obs_sources=OBS_SOURCES):
     sid, dep = case["storm_id"], case["deployment"]
     lines = [
         f"# {case['storm_name']} {case['year']} ({sid}) -- WoFS deployment {dep}",
@@ -171,7 +183,8 @@ def render_case(case, orion=ORION):
             "# No scoring window: nothing complete to verify. Kept so the",
             "# deployment still shows up in every later table.",
         ]
-    lines += [""] + path_lines(case["storm_name"], dep, orion) + [""]
+    lines += ([""] + obs_lines(obs_sources) + [""]
+              + path_lines(case["storm_name"], dep, orion) + [""])
     return "\n".join(lines)
 
 
@@ -181,6 +194,9 @@ def main(argv):
     ap.add_argument("windows_csv")
     ap.add_argument("--out-dir", default="storms")
     ap.add_argument("--lookback-h", type=int, default=HAFS_LOOKBACK_H)
+    ap.add_argument("--obs-sources", nargs="+", default=list(OBS_SOURCES),
+                    choices=["stage4", "mrms"],
+                    help="obs products to regrid (default: both)")
     args = ap.parse_args(argv)
 
     windows = {}
@@ -196,7 +212,7 @@ def main(argv):
             continue
         case = build_case(row, windows.get(key, []), args.lookback_h)
         path = out_dir / case_filename(case)
-        path.write_text(render_case(case))
+        path.write_text(render_case(case, obs_sources=tuple(args.obs_sources)))
         state = (f"{case['span'][2]} windows" if case["span"]
                  else "NO COMPLETE WINDOWS")
         print(f"wrote {path}  ({state})")

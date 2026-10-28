@@ -18,14 +18,14 @@ def test_parse_args_requires_command():
 def test_parse_args_accepts_every_current_command():
     for command in run.COMMANDS:
         assert run.parse_args(["case.yaml", command]) == (
-            "case.yaml", command, None)
+            "case.yaml", command, None, None)
 
 
 def test_parse_args_res_km_option_anywhere():
     assert run.parse_args(["c.yaml", "build-grid", "--res-km", "3"]) == (
-        "c.yaml", "build-grid", 3.0)
+        "c.yaml", "build-grid", 3.0, None)
     assert run.parse_args(["--res-km", "3", "c.yaml", "regrid-obs"]) == (
-        "c.yaml", "regrid-obs", 3.0)
+        "c.yaml", "regrid-obs", 3.0, None)
     for bad in (["c.yaml", "build-grid", "--res-km"],
                 ["c.yaml", "build-grid", "--res-km", "fine"]):
         try:
@@ -37,8 +37,23 @@ def test_parse_args_res_km_option_anywhere():
 
 def test_build_mask_is_a_command():
     assert "build-mask" in run.COMMANDS
-    assert run.parse_args(["c.yaml", "build-mask"]) == ("c.yaml", "build-mask",
-                                                        None)
+    assert run.parse_args(["c.yaml", "build-mask"]) == (
+        "c.yaml", "build-mask", None, None)
+
+
+def test_parse_args_sources_option():
+    assert run.parse_args(["c.yaml", "regrid-obs", "--sources", "mrms"]) == (
+        "c.yaml", "regrid-obs", None, ("mrms",))
+    assert run.parse_args(["c.yaml", "regrid-obs", "--sources", "stage4",
+                           "mrms", "--res-km", "3"]) == (
+        "c.yaml", "regrid-obs", 3.0, ("stage4", "mrms"))
+    for bad in (["c.yaml", "regrid-obs", "--sources"],
+                ["c.yaml", "regrid-obs", "--sources", "aorc"]):
+        try:
+            run.parse_args(bad)
+            assert False, f"{bad} should be rejected"
+        except SystemExit:
+            pass
 
 
 def test_parse_args_rejects_unknown_command():

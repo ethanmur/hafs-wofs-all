@@ -44,6 +44,20 @@ class RegridConfig:
     tolerance_pct: float = 2.0
     met_bin_dir: Optional[Path] = None
     fields: dict = field(default_factory=dict)
+    # Where each source's files go, when they are not all in cache_dir (Stage IV
+    # and MRMS each keep their own folder). cache_dir is the default.
+    source_dirs: dict = field(default_factory=dict)
+
+    def dir_for(self, source):
+        return Path(self.source_dirs.get(source, self.cache_dir))
+
+    def all_dirs(self):
+        """Every distinct folder this config writes into."""
+        seen = []
+        for d in (self.cache_dir, *map(Path, self.source_dirs.values())):
+            if d not in seen:
+                seen.append(d)
+        return seen
 
     def field_spec(self, source):
         return self.fields.get(source, DEFAULT_FIELDS[source])
@@ -54,13 +68,16 @@ class RegridConfig:
         # the folder sorts chronologically.
         stem = "_".join(p for p in (f"{valid_dt:%Y%m%d%H}", source,
                                     self.res_label) if p)
-        return self.cache_dir / f"{stem}.nc"
+        return self.dir_for(source) / f"{stem}.nc"
+
+    def settings_path_in(self, directory):
+        stem = "_".join(p for p in (Path(SETTINGS_FILE).stem, self.res_label)
+                        if p)
+        return Path(directory) / f"{stem}{Path(SETTINGS_FILE).suffix}"
 
     @property
     def settings_path(self):
-        stem = "_".join(p for p in (Path(SETTINGS_FILE).stem, self.res_label)
-                        if p)
-        return self.cache_dir / f"{stem}{Path(SETTINGS_FILE).suffix}"
+        return self.settings_path_in(self.cache_dir)
 
     @property
     def staging_dir(self):
@@ -265,28 +282,30 @@ def resolve_to_grid(config):
 
 
 def check_cache_settings(config):
-    """Refuse to mix two different regrids in one cache_dir.
+    """Refuse to mix two different regrids in one folder.
 
-    The settings are recorded in the cache itself, so a changed grid, method or
-    width cannot quietly reuse output regridded the old way.
+    The settings are recorded in each folder the config writes into, so a
+    changed grid, method or width cannot quietly reuse output regridded the old
+    way. Each source's folder keeps its own record.
     """
-    path = config.settings_path
     want = (f"grid_name={config.grid_name}\nmethod={config.method}\n"
             f"width={config.width}\nvld_thresh={config.vld_thresh}\n"
             f"grid_spec={config.grid_spec}\n")
-    if path.exists():
-        have = path.read_text()
-        if have != want:
-            raise ValueError(
-                f"{config.cache_dir} already holds output regridded with "
-                f"different settings:\n  on disk:    "
-                f"{' '.join(have.split())}\n  configured: "
-                f"{' '.join(want.split())}\nDelete this deployment's files "
-                f"in {config.cache_dir} (names ending {config.res_label!r}) "
-                "to regrid with the new settings.")
-        return
-    config.cache_dir.mkdir(parents=True, exist_ok=True)
-    path.write_text(want)
+    for directory in config.all_dirs():
+        path = config.settings_path_in(directory)
+        if path.exists():
+            have = path.read_text()
+            if have != want:
+                raise ValueError(
+                    f"{directory} already holds output regridded with "
+                    f"different settings:\n  on disk:    "
+                    f"{' '.join(have.split())}\n  configured: "
+                    f"{' '.join(want.split())}\nDelete this deployment's "
+                    f"files in {directory} (names ending "
+                    f"{config.res_label!r}) to regrid with the new settings.")
+            continue
+        directory.mkdir(parents=True, exist_ok=True)
+        path.write_text(want)
 
 
 # =============================================================================

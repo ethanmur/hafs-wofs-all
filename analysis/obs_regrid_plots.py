@@ -287,13 +287,16 @@ def available_sources(case, cfg, timestamps):
 
 def load_budget(case):
     """{(valid "YYYY-mm-dd HH:MM", source): mean_pct_diff} from the
-    regrid-obs conservation CSV, or {} if it hasn't been written."""
-    path = case.budget_csv_path
-    if not path.exists():
-        return {}
-    with open(path, newline="") as fh:
-        return {(r["valid"], r["source"]): float(r["mean_pct_diff"])
-                for r in csv.DictReader(fh)}
+    regrid-obs conservation CSVs (one per product), or {} if none is written."""
+    out = {}
+    for source in case.regrid_sources:
+        path = case.budget_csv_path(source)
+        if not path.exists():
+            continue
+        with open(path, newline="") as fh:
+            out.update({(r["valid"], r["source"]): float(r["mean_pct_diff"])
+                        for r in csv.DictReader(fh)})
+    return out
 
 
 def _budget_note(budget, t, source):
@@ -349,7 +352,8 @@ def plot_regrid(case):
     dirs = {k: (out if k == "compare-regrid" else out / k) for k in kinds}
     domain = centred_domain(glat, glon)
     grid_desc = f"{case.res_km:g} km deployment grid ({cfg.method})"
-    print(f"Regrid cache: {cfg.cache_dir}")
+    print("Regrid cache: " + "; ".join(f"{s} {cfg.dir_for(s)}"
+                                       for s in sources))
     print(f"Output:       {out}")
     print(f"Domain:       {domain}", flush=True)
 

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 
+import deployment_case as dc
 from case_helpers import make_case
 from obs_regrid_plots import (crop_slices, load_budget, track_segment,
                               available_sources, _budget_note)
@@ -66,13 +67,28 @@ def test_load_budget_reads_conservation_csv():
     tmp = Path(tempfile.mkdtemp())
     case = _case(tmp)
     assert load_budget(case) == {}
-    case.regrid_dir.mkdir(parents=True)
-    case.budget_csv_path.write_text(
+    case.stage4_regrid_dir.mkdir(parents=True)
+    case.budget_csv_path("stage4").write_text(
         "valid,source,mean_pct_diff\n2024-09-24 02:00,stage4,-0.198\n")
     budget = load_budget(case)
     t = datetime(2024, 9, 24, 2)
     assert "-0.20%" in _budget_note(budget, t, "stage4")
     assert _budget_note(budget, t, "mrms") == ""
+
+
+def test_load_budget_merges_each_products_own_csv():
+    tmp = Path(tempfile.mkdtemp())
+    case = make_case(tmp, case_slug="c", valid_start=datetime(2024, 9, 24, 0),
+                     valid_end=datetime(2024, 9, 24, 3),
+                     regrid=dc.RegridSettings(sources=("stage4", "mrms")))
+    for source, pct in (("stage4", "-0.198"), ("mrms", "0.050")):
+        case.regrid_dir_for(source).mkdir(parents=True)
+        case.budget_csv_path(source).write_text(
+            f"valid,source,mean_pct_diff\n2024-09-24 02:00,{source},{pct}\n")
+    budget = load_budget(case)
+    t = datetime(2024, 9, 24, 2)
+    assert "-0.20%" in _budget_note(budget, t, "stage4")
+    assert "+0.05%" in _budget_note(budget, t, "mrms")
 
 
 class _Cfg:

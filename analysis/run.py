@@ -1,6 +1,7 @@
 """Single entry point for the HAFS/WoFS rainfall verification framework.
 
     python analysis/run.py <case.yaml> <command> [--res-km N]
+                                               [--sources stage4 mrms]
 
 Loads a per-deployment case (deployment_case.py) and runs one command:
   build-grid    build this deployment's verification grid: the WoFS domain
@@ -41,6 +42,10 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 stats CSVs (needs both products regridded); adds a variant
                 restricted to the validity mask when build-mask has run
 
+Obs products come from the case's regrid.sources (stage4 and mrms in the
+generated cases); --sources picks them for one run, e.g. `regrid-obs --sources
+mrms` regrids MRMS alone, without needing the raw Stage IV files.
+
 Resolution is 6 km unless a case sets grid.res_km or the run passes --res-km;
 only a non-default resolution adds its label to output names, so the default
 run's files never move.
@@ -59,10 +64,22 @@ COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
 
 
 def parse_args(argv):
-    """(yaml_path, command, res_km) from argv. The command is required;
-    --res-km N overrides the case's grid.res_km (None keeps it)."""
+    """(yaml_path, command, res_km, sources) from argv. The command is
+    required; --res-km N overrides the case's grid.res_km and --sources
+    stage4 mrms overrides its regrid.sources (None keeps the case's)."""
     argv = list(argv)
-    res_km = None
+    res_km = sources = None
+    if "--sources" in argv:
+        i = argv.index("--sources")
+        j = i + 1
+        while j < len(argv) and not argv[j].startswith("--") \
+                and argv[j] in ("stage4", "mrms"):
+            j += 1
+        sources = tuple(argv[i + 1:j])
+        if not sources:
+            print("--sources needs stage4 and/or mrms, e.g. --sources mrms")
+            raise SystemExit(2)
+        del argv[i:j]
     if "--res-km" in argv:
         i = argv.index("--res-km")
         try:
@@ -72,14 +89,15 @@ def parse_args(argv):
             raise SystemExit(2)
         del argv[i:i + 2]
     if len(argv) < 2:
-        print("usage: run.py <case.yaml> <command> [--res-km N]\n"
+        print("usage: run.py <case.yaml> <command> [--res-km N] "
+              "[--sources stage4 mrms]\n"
               f"commands: {' | '.join(COMMANDS)}")
         raise SystemExit(2)
     yaml_path, command = argv[0], argv[1]
     if command not in COMMANDS:
         print(f"unknown command '{command}'; choose from {COMMANDS}")
         raise SystemExit(2)
-    return yaml_path, command, res_km
+    return yaml_path, command, res_km, sources
 
 
 def dispatch(case, command):
@@ -110,10 +128,10 @@ def dispatch(case, command):
 
 
 def main(argv):
-    yaml_path, command, res_km = parse_args(argv)
+    yaml_path, command, res_km, sources = parse_args(argv)
     import deployment_case
     import run_log
-    case = deployment_case.from_yaml(yaml_path, res_km=res_km)
+    case = deployment_case.from_yaml(yaml_path, res_km=res_km, sources=sources)
     with run_log.tee(case, command):
         dispatch(case, command)
 

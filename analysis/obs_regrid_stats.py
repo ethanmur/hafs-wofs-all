@@ -280,7 +280,8 @@ def stats_regrid(case):
               "-- 'all' variant only.")
     pairs = list(itertools.combinations(sources, 2))
     out = case.regrid_plot_dir
-    print(f"Regrid cache: {cfg.cache_dir}")
+    print("Regrid cache: " + "; ".join(f"{s} {cfg.dir_for(s)}"
+                                       for s in sources))
     print(f"Output:       {out}")
     if pairs:
         print(f"Variants:     {', '.join(variants)}   pairs: "

@@ -79,7 +79,8 @@ def test_grid_resolution_can_be_set(tmp_path):
 
 
 def test_regrid_defaults_to_the_truth_product_and_derives_paths(tmp_path):
-    case = dc.from_yaml(_write(tmp_path, _generated(GOOD)))
+    cfg = {k: v for k, v in _generated(GOOD).items() if k != "regrid"}
+    case = dc.from_yaml(_write(tmp_path, cfg))
     assert case.regrid_sources == ("stage4",)
     assert case.regrid.method == "BUDGET" and case.regrid.width == 2
     assert case.folder_name == "20240708_d1_beryl" and case.res_label == "6km"
@@ -111,20 +112,25 @@ def test_files_go_to_flat_data_and_figures_folders(tmp_path):
         f"{root}/data/json-grids/2024_02l_beryl_20240708_d1_grid.json")
     assert case.grid_plot_path == Path(
         f"{root}/figures/regrid-wofs/2024_02l_beryl_20240708_d1_grid.png")
-    assert case.regrid_dir == Path(
+    assert case.stage4_regrid_dir == Path(
         f"{root}/data/stage-iv-regrid/20240708_d1_beryl")
+    assert case.mrms_regrid_dir == Path(
+        f"{root}/data/mrms-regrid/20240708_d1_beryl")
     assert case.regrid_plot_dir == Path(
         f"{root}/figures/regrid-obs-tests/20240708_d1_beryl")
     assert case.log_dir == Path(f"{root}/data/logs")
-    assert case.budget_csv_path.parent == case.regrid_dir
-    assert case.budget_csv_path.name == \
+    # each product's check sits beside the files it describes
+    assert case.budget_csv_path().parent == case.stage4_regrid_dir
+    assert case.budget_csv_path("mrms").parent == case.mrms_regrid_dir
+    assert case.budget_csv_path("mrms").name == \
         "regrid_budget_2024070818_2024070821.csv"
     assert not hasattr(case, "out_dir")
 
 
 def test_every_destination_is_required_and_out_dir_is_gone(tmp_path):
     cfg = _generated(GOOD)
-    for key in ("grid_json_dir", "grid_plot_dir", "regrid_dir",
+    for key in ("grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
+                "mrms_regrid_dir",
                 "regrid_plot_dir", "log_dir"):
         missing = {k: v for k, v in cfg.items() if k != key}
         with pytest.raises(ValueError):
@@ -138,7 +144,7 @@ def test_default_resolution_leaves_every_path_unchanged(tmp_path):
     assert case.res_km == 6.0 and case.res_suffix == ""
     assert case.grid_json_path.name == "2024_02l_beryl_20240708_d1_grid.json"
     assert case.grid_plot_path.name == "2024_02l_beryl_20240708_d1_grid.png"
-    assert case.budget_csv_path.name == "regrid_budget_2024070818_2024070821.csv"
+    assert case.budget_csv_path().name == "regrid_budget_2024070818_2024070821.csv"
     assert case.regrid_plot_dir.name == "20240708_d1_beryl"
 
 
@@ -151,15 +157,15 @@ def test_other_resolutions_add_their_label_where_names_would_collide(tmp_path):
         "2024_02l_beryl_20240708_d1_3km_grid.json"
     assert three.grid_plot_path.name == \
         "2024_02l_beryl_20240708_d1_3km_grid.png"
-    assert three.budget_csv_path.name == \
+    assert three.budget_csv_path().name == \
         "regrid_budget_2024070818_2024070821_3km.csv"
     assert three.regrid_plot_dir.name == "20240708_d1_beryl_3km"
     # nothing the two runs write can be the same file
-    for attr in ("grid_json_path", "grid_plot_path", "budget_csv_path",
-                 "regrid_plot_dir"):
+    for attr in ("grid_json_path", "grid_plot_path", "regrid_plot_dir"):
         assert getattr(three, attr) != getattr(six, attr), attr
+    assert three.budget_csv_path() != six.budget_csv_path()
     # the regridded files and settings already carry the resolution; same folder
-    assert three.regrid_dir == six.regrid_dir
+    assert three.stage4_regrid_dir == six.stage4_regrid_dir
 
 
 def test_yaml_grid_block_sets_the_resolution_and_the_override_wins(tmp_path):
@@ -193,3 +199,24 @@ def test_mask_settings_default_and_validate(tmp_path):
     with pytest.raises(ValueError):
         dc.from_yaml(_write(tmp_path, dict(_generated(GOOD),
                                            masks={"swath_km": 500})))
+
+
+def test_generated_cases_regrid_both_products_each_into_its_own_folder(tmp_path):
+    case = dc.from_yaml(_write(tmp_path, _generated(GOOD)))
+    assert case.regrid_sources == ("stage4", "mrms")
+    assert case.truth_source == "stage4"             # truth is still Stage IV
+    assert case.regrid_dir_for("stage4") != case.regrid_dir_for("mrms")
+    assert case.regrid_dir_for("mrms").parent.name == "mrms-regrid"
+    assert case.regrid_dir_for("stage4").parent.name == "stage-iv-regrid"
+    # one shared plot folder: the file names carry the source
+    assert case.regrid_plot_dir.name == "20240708_d1_beryl"
+
+
+def test_sources_override_replaces_the_yaml_without_editing_it(tmp_path):
+    path = _write(tmp_path, _generated(GOOD))       # the YAML asks for both
+    assert dc.from_yaml(path).regrid_sources == ("stage4", "mrms")
+    only_mrms = dc.from_yaml(path, sources=("mrms",))
+    assert only_mrms.regrid_sources == ("mrms",)
+    assert only_mrms.truth_source == "stage4"        # truth is unchanged
+    with pytest.raises(ValueError):
+        dc.from_yaml(path, sources=("aorc",))

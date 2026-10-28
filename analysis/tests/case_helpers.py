@@ -8,7 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import deployment_case as dc
 
-_DIRS = ("grid_json_dir", "grid_plot_dir", "regrid_dir", "regrid_plot_dir",
+_DIRS = ("grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
+         "mrms_regrid_dir", "regrid_plot_dir",
          "mask_dir", "mask_plot_dir", "manifest_dir", "wofs_regrid_1h_dir",
          "wofs_regrid_3h_dir", "log_dir", "mrms_cache_dir", "stage4_cache_dir")
 

@@ -19,7 +19,9 @@ from obs_cases import (hourly_timestamps, check_cache_complete, mrms_s3_key,
 
 def _case(tmp_path, **overrides):
     # this module's directories keep the short names its fixtures expect
-    names = dict(regrid_dir=tmp_path / "rg", mrms_cache_dir=tmp_path / "mrms",
+    names = dict(stage4_regrid_dir=tmp_path / "rg",
+                 mrms_regrid_dir=tmp_path / "rgm",
+                 mrms_cache_dir=tmp_path / "mrms",
                  stage4_cache_dir=tmp_path / "st4",
                  grid_json_dir=tmp_path / "json")
     names.update(overrides)
@@ -95,7 +97,7 @@ def test_regrid_config_reads_the_grid_spec_and_names_files_by_hour_and_product(
     _write_grid_json(case)
     cfg = regrid_config(case)
     assert cfg.grid_spec.startswith("lambert 150 150")
-    assert cfg.cache_dir == tmp_path / "rg"     # this deployment's own folder
+    assert cfg.cache_dir == tmp_path / "rg"     # the truth product's folder
     assert cfg.method == "BUDGET" and cfg.width == 2
     # the folder names the deployment, so the file needs only hour + product
     assert cfg.output_path("stage4", datetime(2024, 9, 26, 1)) == (
@@ -161,3 +163,41 @@ def test_a_3km_run_finds_its_own_grid_not_the_6km_one(tmp_path):
     assert cfg.output_path("stage4", datetime(2024, 9, 26, 1)).name == \
         "2024092601_stage4_3km.nc"
     assert regrid_config(six).res_label == "6km"
+
+
+def test_each_source_is_regridded_into_its_own_folder(tmp_path):
+    case = _case(tmp_path,
+                 regrid=dc.RegridSettings(sources=("stage4", "mrms")))
+    _write_grid_json(case)
+    cfg = regrid_config(case)
+    t = datetime(2024, 9, 26, 1)
+    assert cfg.output_path("stage4", t) == tmp_path / "rg" / \
+        "2024092601_stage4_6km.nc"
+    assert cfg.output_path("mrms", t) == tmp_path / "rgm" / \
+        "2024092601_mrms_6km.nc"
+    assert set(cfg.all_dirs()) == {tmp_path / "rg", tmp_path / "rgm"}
+
+
+def test_settings_are_recorded_and_checked_in_every_source_folder(tmp_path):
+    import met_regrid
+    case = _case(tmp_path,
+                 regrid=dc.RegridSettings(sources=("stage4", "mrms")))
+    _write_grid_json(case)
+    cfg = regrid_config(case)
+    met_regrid.check_cache_settings(cfg)
+    assert cfg.settings_path_in(tmp_path / "rg").exists()
+    assert cfg.settings_path_in(tmp_path / "rgm").exists()
+    cfg.method = "NEAREST"                           # a changed setting
+    with pytest.raises(ValueError) as err:
+        met_regrid.check_cache_settings(cfg)
+    assert "different settings" in str(err.value)
+
+
+def test_an_mrms_only_run_writes_only_to_the_mrms_folder(tmp_path):
+    case = _case(tmp_path, regrid=dc.RegridSettings(sources=("mrms",)))
+    _write_grid_json(case)
+    cfg = regrid_config(case)
+    assert cfg.cache_dir == tmp_path / "rgm"
+    assert cfg.all_dirs() == [tmp_path / "rgm"]      # no stage-iv folder made
+    missing = check_cache_complete(case)             # needs MRMS files only
+    assert missing and all("MRMS" in m for m in missing)

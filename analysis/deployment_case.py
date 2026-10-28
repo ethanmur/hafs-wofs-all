@@ -18,13 +18,15 @@ DEFAULT_RES_KM = 6.0
 TRUTH_SOURCES = ("stage4", "mrms")
 TOP_KEYS = {"storm_name", "storm_id", "deployment", "best_track",
             "truth_source", "wofs", "valid_start", "valid_end", "hafs",
-            "grid_json_dir", "grid_plot_dir", "regrid_dir", "regrid_plot_dir",
+            "grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
+            "mrms_regrid_dir", "regrid_plot_dir",
             "mask_dir", "mask_plot_dir", "manifest_dir", "wofs_regrid_1h_dir",
             "wofs_regrid_3h_dir", "log_dir", "mrms_cache_dir",
             "stage4_cache_dir", "grid", "regrid", "regrid_plots", "masks"}
 # Where each kind of file goes. Similar files sit together, flat, under
 # data/ or figures/; there is no per-case output folder.
-PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "regrid_dir",
+PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
+             "mrms_regrid_dir",
              "regrid_plot_dir", "mask_dir", "mask_plot_dir", "manifest_dir",
              "wofs_regrid_1h_dir", "wofs_regrid_3h_dir", "log_dir")
 MASK_KEYS = {"coast_buffer_km", "ne_scale"}
@@ -93,7 +95,8 @@ class DeploymentCase:
     complete_windows: int
     grid_json_dir: Path        # data/json-grids/        <case>_grid.json
     grid_plot_dir: Path        # figures/regrid-wofs/    <case>_grid.png
-    regrid_dir: Path           # data/stage-iv-regrid/<dep>_<storm>/  regridded obs + CSV
+    stage4_regrid_dir: Path    # data/stage-iv-regrid/<dep>_<storm>/  Stage IV + its CSV
+    mrms_regrid_dir: Path      # data/mrms-regrid/<dep>_<storm>/      MRMS + its CSV
     regrid_plot_dir: Path      # figures/regrid-obs-tests/<dep>_<storm>/
     mask_dir: Path             # data/obs-valid-masks/   <case>_obs_valid.nc
     mask_plot_dir: Path        # figures/obs-valid-masks/ <case>_obs_valid.png
@@ -188,12 +191,18 @@ class DeploymentCase:
     def res_label(self):
         return f"{self.res_km:g}km"
 
-    @property
-    def budget_csv_path(self):
-        """The conservation check, beside the regridded data it describes."""
-        return self.regrid_dir / (f"regrid_budget_{self.valid_start:%Y%m%d%H}_"
-                                  f"{self.valid_end:%Y%m%d%H}"
-                                  f"{self.res_suffix}.csv")
+    def regrid_dir_for(self, source):
+        """The folder holding one obs product's regridded files."""
+        return {"stage4": self.stage4_regrid_dir,
+                "mrms": self.mrms_regrid_dir}[source]
+
+    def budget_csv_path(self, source=None):
+        """One product's conservation check, beside the files it describes
+        (default: the truth product)."""
+        source = source or self.truth_source
+        return self.regrid_dir_for(source) / (
+            f"regrid_budget_{self.valid_start:%Y%m%d%H}_"
+            f"{self.valid_end:%Y%m%d%H}{self.res_suffix}.csv")
 
     @property
     def regrid_sources(self):
@@ -207,9 +216,10 @@ class DeploymentCase:
         return self.wofs_root.parent.name
 
 
-def from_yaml(path, res_km=None):
-    """The case in `path`. `res_km` overrides grid.res_km (run.py --res-km), so
-    another resolution needs no copy of the YAML."""
+def from_yaml(path, res_km=None, sources=None):
+    """The case in `path`. `res_km` overrides grid.res_km (run.py --res-km) and
+    `sources` overrides regrid.sources (run.py --sources), so another
+    resolution or obs product needs no edit to the YAML."""
     path = Path(path)
     cfg = yaml.safe_load(path.read_text()) or {}
     _unknown(cfg, TOP_KEYS, "case")
@@ -248,7 +258,8 @@ def from_yaml(path, res_km=None):
                          f"expected any of {PLOT_PANELS}")
     res = float(res_km if res_km is not None
                 else grid.get("res_km", DEFAULT_RES_KM))
-    sources = tuple(str(v).lower() for v in (regrid.get("sources") or ()))
+    sources = tuple(str(v).lower()
+                    for v in (sources or regrid.get("sources") or ()))
     bad = [v for v in sources if v not in TRUTH_SOURCES]
     if bad:
         raise ValueError(f"regrid.sources has unknown source(s) {bad}; "
@@ -266,7 +277,8 @@ def from_yaml(path, res_km=None):
         complete_windows=int(wofs.get("complete_windows", 0)),
         grid_json_dir=Path(cfg["grid_json_dir"]),
         grid_plot_dir=Path(cfg["grid_plot_dir"]),
-        regrid_dir=Path(cfg["regrid_dir"]),
+        stage4_regrid_dir=Path(cfg["stage4_regrid_dir"]),
+        mrms_regrid_dir=Path(cfg["mrms_regrid_dir"]),
         regrid_plot_dir=_resolution_dir(Path(cfg["regrid_plot_dir"]), res),
         mask_dir=Path(cfg["mask_dir"]),
         mask_plot_dir=Path(cfg["mask_plot_dir"]),

@@ -29,9 +29,15 @@ hafs:
     HFSA: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs/2023-09e/HFSA
     HFSB: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs/2023-09e/HFSB
 
+# Obs products regridded onto the grid (truth_source is the one
+# the anomaly maps and comparisons are measured against).
+regrid:
+  sources: [stage4, mrms]
+
 grid_json_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/json-grids/
 grid_plot_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-wofs/
-regrid_dir:      /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv-regrid/20230820_d1_hilary/
+stage4_regrid_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv-regrid/20230820_d1_hilary/
+mrms_regrid_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms-regrid/20230820_d1_hilary/
 regrid_plot_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-obs-tests/20230820_d1_hilary/
 manifest_dir:    /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/window-manifests/
 wofs_regrid_1h_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/wofs-regrid-1h/20230820_d1_hilary/

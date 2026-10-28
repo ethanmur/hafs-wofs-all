@@ -64,7 +64,7 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   |---|---|
   | grid specs (`<case>_grid.json`) | `data/json-grids/` |
   | grid sanity maps (`<case>_grid.png`) | `figures/regrid-wofs/` |
-  | regridded obs (`<YYYYMMDDHH>_<source>_6km.nc`), their conservation CSV and settings guard | `data/stage-iv-regrid/<deployment>_<storm>/` |
+  | regridded obs (`<YYYYMMDDHH>_<source>_6km.nc`), each product's conservation CSV and settings guard | `data/stage-iv-regrid/<deployment>_<storm>/`, `data/mrms-regrid/<deployment>_<storm>/` |
   | regridded-obs maps, `stats-regrid` figures and CSVs | `figures/regrid-obs-tests/<deployment>_<storm>/` |
   | observation-validity masks (`<case>_obs_valid.nc`), their maps | `data/obs-valid-masks/`, `figures/obs-valid-masks/` |
   | window manifests (`<case>_manifest.csv`, `<case>_windows.csv`) | `data/window-manifests/` |
@@ -76,7 +76,7 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   Later phases follow the same rule: data products into a `data/<kind>/` folder,
   figures into a `figures/<kind>/` folder, named for the case. The destinations
   are explicit keys in each case YAML (`grid_json_dir`, `grid_plot_dir`,
-  `regrid_dir`, `regrid_plot_dir`, `mask_dir`, `mask_plot_dir`, `manifest_dir`,
+  `stage4_regrid_dir`, `mrms_regrid_dir`, `regrid_plot_dir`, `mask_dir`, `mask_plot_dir`, `manifest_dir`,
   `wofs_regrid_1h_dir`, `wofs_regrid_3h_dir`, `log_dir`).
 
   **Resolution.** 6 km is the default and adds nothing to any name, so every
@@ -369,16 +369,19 @@ go with it; anomalies are now against the case's `truth_source`.
 module imports `aorc_common`; tests pass.
 
 ### B1. Cache layout
-Regridded obs live in one folder per deployment under `data/stage-iv-regrid/`,
-named `<deployment>_<storm>` (`20240927_d1_helene/`), matching the plot folders.
-The deployment carries its date because `d1` alone repeats: Helene has a `d1` on
-two days that overlap in time. Inside, files are named
-`<YYYYMMDDHH>_<source>_6km.nc` (`2024092707_stage4_6km.nc`), so the folder sorts
-chronologically and a second product sits beside the first
-(`2024092707_mrms_6km.nc`). Beside them are `regrid_settings_6km.txt`, which
-records the grid spec, method and width, and `regrid_budget_<start>_<end>.csv`,
-the conservation check. A different grid or setting refuses to reuse the
-folder's files, so a rebuilt grid cannot quietly mix with old output.
+Each obs product has its own folder per deployment, named
+`<deployment>_<storm>` (`20240927_d1_helene/`): `data/stage-iv-regrid/` and
+`data/mrms-regrid/` (the `stage4_regrid_dir` and `mrms_regrid_dir` keys), matching
+the plot folders. The deployment carries its date because `d1` alone repeats:
+Helene has a `d1` on two days that overlap in time. Inside, files are named
+`<YYYYMMDDHH>_<source>_6km.nc` (`2024092707_stage4_6km.nc`,
+`2024092707_mrms_6km.nc`), so each folder sorts chronologically. Beside the files
+sit `regrid_settings_6km.txt`, which records the grid spec, method and width, and
+`regrid_budget_<start>_<end>.csv`, that product's conservation check. Each
+folder keeps its own record, and a different grid or setting refuses to reuse a
+folder's files, so a rebuilt grid cannot quietly mix with old output. The
+regridded-obs maps stay together in one `regrid-obs-tests/<deployment>_<storm>/`
+folder, since their file names start with the product.
 **Native downloads are never touched:** the MRMS re-download is the expensive
 part and those files are grid-independent.
 
@@ -386,8 +389,10 @@ part and those files are grid-independent.
 
     python analysis/run.py storms/<case>.yaml regrid-obs
 
-`truth_source` defaults to `stage4`; `regrid.sources: [stage4, mrms]` in the
-case YAML regrids both, for the MRMS sensitivity check. Needs `build-grid` to
+`truth_source` defaults to `stage4`. The generated case YAMLs carry
+`regrid: {sources: [stage4, mrms]}`, so both products are regridded, MRMS being
+the sensitivity check; `--sources mrms` (or `stage4`) picks the products for one
+run without editing the YAML, and an MRMS-only run needs only the MRMS files. Needs `build-grid` to
 have run (it reads `<case>_grid.json`) and `module load met`. Every hour in
 `(valid_start, valid_end]` is regridded; the obs files are stamped at the end
 of the hour, so the window (15Z, 18Z] is the 16Z, 17Z and 18Z files. The output
