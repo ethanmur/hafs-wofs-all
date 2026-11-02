@@ -268,6 +268,14 @@ class DeploymentCase:
             f"{self.valid_end:%Y%m%d%H}{self.res_suffix}.csv")
 
     @property
+    def plot_truth(self):
+        """The product plot-eyeball draws as truth: the one `--sources` (or
+        regrid.sources) names when it names exactly one, so a run can switch
+        products without editing the YAML; otherwise truth_source."""
+        return (self.regrid.sources[0] if len(self.regrid.sources) == 1
+                else self.truth_source)
+
+    @property
     def regrid_sources(self):
         """Obs products regrid-obs handles: the truth product unless
         regrid.sources names more (e.g. both, for the MRMS sensitivity)."""
@@ -291,7 +299,7 @@ def from_yaml(path, res_km=None, sources=None):
         if key not in cfg:
             raise ValueError(f"{path.name}: {key} is required")
 
-    truth = str(cfg.get("truth_source", "stage4")).lower()
+    truth = str(cfg.get("truth_source", "mrms")).lower()
     if truth not in TRUTH_SOURCES:
         raise ValueError(f"truth_source must be one of {TRUTH_SOURCES}, "
                          f"got {truth!r}")

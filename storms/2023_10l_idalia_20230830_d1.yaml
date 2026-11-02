@@ -7,8 +7,8 @@ storm_id: 2023-10l
 deployment: 20230830_d1
 best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal102023.dat
 
-# Stage IV by default; mrms switches the truth product.
-truth_source: stage4
+# MRMS is the truth product; stage4 switches it (the Stage IV sensitivity).
+truth_source: mrms
 
 wofs:
   root: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/wofs-full/2023_IDALIA/20230830_d1

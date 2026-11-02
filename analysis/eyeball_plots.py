@@ -23,6 +23,10 @@ and 9), because every pair would be thousands of figures:
                     by eye. The headline carries the budget-check change from
                     the regrid-hafs CSV.
 
+The truth panel is the case's truth_source (MRMS), or the one product named by
+`--sources` (e.g. `--sources stage4`), which needs that product's `window-obs`
+output.
+
 Figures use plot_common's precipitation scale: a log scale in inches by
 default (`eyeball.colorbar_style: true_scale`) or the banded ladder
 (`standard`).
@@ -117,7 +121,7 @@ def selection(case, need_wofs, need_truth):
         wofs = runs_for(case.wofs_regrid_3h_dir, w.end, "wofs", res)
         if need_wofs and not wofs:
             continue
-        if need_truth and not case.obs_window_path(case.truth_source,
+        if need_truth and not case.obs_window_path(case.plot_truth,
                                                    w.end).exists():
             continue
         found.append((w, wofs, hafs))
@@ -158,7 +162,8 @@ def plot_eyeball(case):
                          "WoFS window; nothing to plot.")
     chosen = selection(case, need_wofs=True, need_truth=True)
     s = case.eyeball
-    print(f"Truth  : {LABELS[case.truth_source]}; WoFS members "
+    truth_source = case.plot_truth
+    print(f"Truth  : {LABELS[truth_source]}; WoFS members "
           f"{', '.join(map(str, s.members))}; up to {s.windows} windows x "
           f"{s.cycles} cycles per HAFS configuration; colour scale "
           f"{s.colorbar_style}")
@@ -166,8 +171,7 @@ def plot_eyeball(case):
         print("\nNo window has WoFS, HAFS and truth 3 h files together. Run "
               "regrid-wofs, regrid-hafs and window-obs first.")
         return []
-    first_truth = case.obs_window_path(case.truth_source,
-                                       chosen[0]["window"].end)
+    first_truth = case.obs_window_path(truth_source, chosen[0]["window"].end)
     lat, lon, ref = met_regrid.read_regridded(first_truth)
     domain = centred_domain(lat, lon)
     overlays = _overlays(case, lat, lon)
@@ -179,7 +183,7 @@ def plot_eyeball(case):
     for item in chosen:
         w = item["window"]
         truth = met_regrid.read_regridded(
-            case.obs_window_path(case.truth_source, w.end))[2]
+            case.obs_window_path(truth_source, w.end))[2]
         _check_same_grid(ref.shape, truth, "the truth window")
         w_init, w_path = item["wofs"]
         members = ww.read_window(w_path)
@@ -201,7 +205,7 @@ def plot_eyeball(case):
                       "precip"),
                      (f"{config} cycle {h_init:%d %HZ} "
                       f"({lead_text(h_init, w)})", lat, lon, hafs, "precip"),
-                     (f"{LABELS[case.truth_source]} (truth)", lat, lon, truth,
+                     (f"{LABELS[truth_source]} (truth)", lat, lon, truth,
                       "precip")],
                     domain, track_line,
                     f"{case.storm_name} {case.deployment}: 3 h precipitation "

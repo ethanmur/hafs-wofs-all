@@ -7,8 +7,8 @@ storm_id: 2024-14l
 deployment: 20241009_d1
 best_track: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck/bal142024.dat
 
-# Stage IV by default; mrms switches the truth product.
-truth_source: stage4
+# MRMS is the truth product; stage4 switches it (the Stage IV sensitivity).
+truth_source: mrms
 
 wofs:
   root: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/wofs-full/2024_MILTON/20241009_d1

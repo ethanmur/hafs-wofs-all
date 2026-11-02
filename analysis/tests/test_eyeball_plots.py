@@ -60,7 +60,8 @@ def _bdeck(path):
     path.write_text("\n".join(lines) + "\n")
 
 
-def _case(tmp_path, with_wofs=True, with_truth=True, **kw):
+def _case(tmp_path, with_wofs=True, with_truth=True, truth_files="stage4",
+          **kw):
     wofs_root = tmp_path / "wofs" / "2024_BERYL" / "20240708_d1"
     _write_wofs(wofs_root, T(2024, 7, 8, 18), range(0, 73))
     _bdeck(tmp_path / "bt.dat")
@@ -83,7 +84,7 @@ def _case(tmp_path, with_wofs=True, with_truth=True, **kw):
                           {f"rain_mm_m{m:02d}": _field(10 + m)
                            for m in range(12)})
         if with_truth:
-            _write_nc(case.obs_window_path("stage4", w_end),
+            _write_nc(case.obs_window_path(truth_files, w_end),
                       {"precip": _field(99)})
     return case
 
@@ -171,6 +172,25 @@ def test_plot_eyeball_writes_one_figure_per_window_cycle_and_member(tmp_path):
     assert "eyeball_2024070821_hfsa_c2024070812_m00.png" in names
     assert "eyeball_2024070900_hfsb_c2024070700_m09.png" in names
     assert {p.parent for p in written} == {case.eyeball_plot_dir}
+
+
+def test_the_truth_panel_follows_truth_source_or_a_single_sources_choice(
+        tmp_path, capsys):
+    # MRMS windows on disk and truth_source mrms: MRMS is drawn
+    mrms = _case(tmp_path / "a", truth_files="mrms", truth_source="mrms",
+                 eyeball=dc.EyeballSettings(members=(0,), windows=1, cycles=1))
+    assert len(ep.plot_eyeball(mrms)) == 2
+    assert "Truth  : MRMS" in capsys.readouterr().out
+    # truth_source mrms in the YAML, but --sources stage4 for this run
+    both = _case(tmp_path / "b", truth_files="stage4", truth_source="mrms",
+                 regrid=dc.RegridSettings(sources=("stage4",)),
+                 eyeball=dc.EyeballSettings(members=(0,), windows=1, cycles=1))
+    assert both.plot_truth == "stage4"
+    assert len(ep.plot_eyeball(both)) == 2
+    assert "Truth  : Stage IV" in capsys.readouterr().out
+    # the named product has no windows: nothing is drawn, and it says so
+    wrong = _case(tmp_path / "c", truth_files="stage4", truth_source="mrms")
+    assert ep.plot_eyeball(wrong) == []
 
 
 def test_plot_eyeball_skips_a_member_the_run_does_not_have(tmp_path):

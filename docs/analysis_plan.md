@@ -104,7 +104,7 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
 - **HAFS-A and HAFS-B are separate models**, never pooled, because their
   physics differ. A later HAFS "ensemble" is built from several cycles of one
   configuration. Mixing configurations is an experiment, not a default.
-- **Truth product: Stage IV by default, switchable to MRMS** by one config key
+- **Truth product: MRMS by default, switchable to Stage IV** by one config key
   (`truth_source`) with no other change. The `noaa-mrms-pds` archive of
   `MultiSensor_QPE_01H_Pass2` begins 2020-10-14, so it covers every 2023–2024
   case; MRMS matters here because the small sample makes a second truth product
@@ -121,9 +121,9 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   manifest as unavailable; whether more files can be obtained is outside the
   code.
 - Stage IV coverage over the mountain West (Hilary's three California and
-  Nevada domains) is verified by hand; `truth_source: mrms` is the fallback.
+  Nevada domains) is verified by hand; `truth_source: mrms` (now the default) avoids the question.
 - Whether `stats-regrid`'s MRMS-vs-Stage IV comparison earns its place once
-  the MRMS sensitivity check is run; H1 decides. (AORC was removed in B0.)
+  the Stage IV sensitivity check is run; H1 decides. (AORC was removed in B0.)
 - Which WoFS members to verify and how to label them (Phase D1).
 
 ### Deferred
@@ -389,9 +389,9 @@ part and those files are grid-independent.
 
     python analysis/run.py storms/<case>.yaml regrid-obs
 
-`truth_source` defaults to `stage4`. The generated case YAMLs carry
-`regrid: {sources: [stage4, mrms]}`, so both products are regridded, MRMS being
-the sensitivity check; `--sources mrms` (or `stage4`) picks the products for one
+`truth_source` is `mrms` (the generated YAMLs and the code default). The
+generated case YAMLs carry `regrid: {sources: [stage4, mrms]}`, so both products
+are regridded, Stage IV being the sensitivity check; `--sources mrms` (or `stage4`) picks the products for one
 run without editing the YAML, and an MRMS-only run needs only the MRMS files. Needs `build-grid` to
 have run (it reads `<case>_grid.json`) and `module load met`. Every hour in
 `(valid_start, valid_end]` is regridded; the obs files are stamped at the end
@@ -886,7 +886,7 @@ Colorblind-safe palettes throughout (Okabe-Ito; no red/green pairings).
   deployment's projected plane so 500 km is a true constant radius). Then ask
   whether "mostly TC" and "little TC" windows diverge. These need no model data,
   so they join the manifest and the statistics tables whenever this is done.
-- **G4.** MRMS sensitivity: repeat E on `truth_source: mrms`.
+- **G4.** Stage IV sensitivity: repeat E on `truth_source: stage4`.
 - **G5.** Mixing HAFS-A and HAFS-B as an explicit experiment.
 
 ---

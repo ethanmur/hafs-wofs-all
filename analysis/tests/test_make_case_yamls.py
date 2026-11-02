@@ -47,7 +47,7 @@ def test_rendered_available_case_parses_with_expected_keys():
     inv = {"storm": "2024_BERYL", "deployment": "20240708_d1"}
     case = mc.build_case(inv, [_win("2024-07-08 1800Z", "2024-07-08 2100Z")])
     cfg = yaml.safe_load(mc.render_case(case))
-    assert cfg["storm_id"] == "2024-02l" and cfg["truth_source"] == "stage4"
+    assert cfg["storm_id"] == "2024-02l" and cfg["truth_source"] == "mrms"
     assert cfg["valid_start"] == 2024070818 and cfg["valid_end"] == 2024070821
     assert cfg["wofs"]["available"] is True
     assert cfg["regrid"]["sources"] == ["stage4", "mrms"]

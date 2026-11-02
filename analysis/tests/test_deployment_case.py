@@ -29,7 +29,7 @@ GOOD = [{"window_start": "2024-07-08 1800Z",
 def test_loads_a_generated_available_case(tmp_path):
     case = dc.from_yaml(_write(tmp_path, _generated(GOOD)))
     assert case.case_slug == "2024_02l_beryl_20240708_d1"
-    assert case.storm_id == "2024-02l" and case.truth_source == "stage4"
+    assert case.storm_id == "2024-02l" and case.truth_source == "mrms"
     assert case.wofs_available and case.complete_windows == 1
     assert case.valid_start == datetime(2024, 7, 8, 18)
     assert case.valid_end == datetime(2024, 7, 8, 21)
@@ -81,7 +81,7 @@ def test_grid_resolution_can_be_set(tmp_path):
 def test_regrid_defaults_to_the_truth_product_and_derives_paths(tmp_path):
     cfg = {k: v for k, v in _generated(GOOD).items() if k != "regrid"}
     case = dc.from_yaml(_write(tmp_path, cfg))
-    assert case.regrid_sources == ("stage4",)
+    assert case.regrid_sources == ("mrms",)          # the truth product
     assert case.regrid.method == "BUDGET" and case.regrid.width == 2
     assert case.folder_name == "20240708_d1_beryl" and case.res_label == "6km"
     assert case.grid_json_path.name == "2024_02l_beryl_20240708_d1_grid.json"
@@ -120,7 +120,8 @@ def test_files_go_to_flat_data_and_figures_folders(tmp_path):
         f"{root}/figures/regrid-obs-tests/20240708_d1_beryl")
     assert case.log_dir == Path(f"{root}/data/logs")
     # each product's check sits beside the files it describes
-    assert case.budget_csv_path().parent == case.stage4_regrid_dir
+    assert case.budget_csv_path().parent == case.mrms_regrid_dir     # truth: MRMS
+    assert case.budget_csv_path("stage4").parent == case.stage4_regrid_dir
     assert case.budget_csv_path("mrms").parent == case.mrms_regrid_dir
     assert case.budget_csv_path("mrms").name == \
         "regrid_budget_2024070818_2024070821.csv"
@@ -204,7 +205,7 @@ def test_mask_settings_default_and_validate(tmp_path):
 def test_generated_cases_regrid_both_products_each_into_its_own_folder(tmp_path):
     case = dc.from_yaml(_write(tmp_path, _generated(GOOD)))
     assert case.regrid_sources == ("stage4", "mrms")
-    assert case.truth_source == "stage4"             # truth is still Stage IV
+    assert case.truth_source == "mrms"               # MRMS is the truth product
     assert case.regrid_dir_for("stage4") != case.regrid_dir_for("mrms")
     assert case.regrid_dir_for("mrms").parent.name == "mrms-regrid"
     assert case.regrid_dir_for("stage4").parent.name == "stage-iv-regrid"
@@ -217,6 +218,11 @@ def test_sources_override_replaces_the_yaml_without_editing_it(tmp_path):
     assert dc.from_yaml(path).regrid_sources == ("stage4", "mrms")
     only_mrms = dc.from_yaml(path, sources=("mrms",))
     assert only_mrms.regrid_sources == ("mrms",)
-    assert only_mrms.truth_source == "stage4"        # truth is unchanged
+    assert only_mrms.truth_source == "mrms"          # truth is unchanged
+    assert only_mrms.plot_truth == "mrms"
+    only_stage4 = dc.from_yaml(path, sources=("stage4",))
+    assert only_stage4.truth_source == "mrms"        # the setting stays ...
+    assert only_stage4.plot_truth == "stage4"        # ... the plot follows --sources
+    assert dc.from_yaml(path).plot_truth == "mrms"   # both sources -> truth_source
     with pytest.raises(ValueError):
         dc.from_yaml(path, sources=("aorc",))
