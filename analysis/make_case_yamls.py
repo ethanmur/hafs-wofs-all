@@ -117,6 +117,10 @@ def path_lines(storm_name, deployment, orion=ORION):
         f"{deployment}_{storm_name.lower()}/",
         f"regrid_plot_dir: {orion}/figures/regrid-obs-tests/"
         f"{deployment}_{storm_name.lower()}/",
+        f"eyeball_plot_dir: {orion}/figures/eyeball-panels/"
+        f"{deployment}_{storm_name.lower()}/",
+        f"hafs_check_plot_dir: {orion}/figures/hafs-regrid-checks/"
+        f"{deployment}_{storm_name.lower()}/",
         f"manifest_dir:    {orion}/data/window-manifests/",
         f"wofs_regrid_1h_dir: {orion}/data/wofs-regrid-1h/"
         f"{deployment}_{storm_name.lower()}/",

@@ -38,6 +38,14 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 the hour). One file per window and product in
                 <mrms_regrid_3h_dir> / <stage4_regrid_3h_dir>; a window with
                 an hour missing is missing, not rescaled. Needs regrid-obs
+  plot-eyeball  WoFS | HAFS | truth 3 h panels on the same grid and colour
+                scale, for a few windows, HAFS cycles and WoFS members (the
+                case's `eyeball:` block), into <eyeball_plot_dir>. Needs
+                regrid-wofs, regrid-hafs and window-obs
+  plot-hafs-check
+                HAFS native 3 h bucket next to its regridded field for the
+                same few windows and cycles, into <hafs_check_plot_dir>, to
+                catch a regrid that went wrong. Needs regrid-hafs
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself
@@ -63,8 +71,7 @@ Resolution is 6 km unless a case sets grid.res_km or the run passes --res-km;
 only a non-default resolution adds its label to output names, so the default
 run's files never move.
 
-The rest of plan phase D (the eyeball panels, D5b) follows; see
-docs/analysis_plan.md.
+Phase D is complete with the eyeball plots (D5b); see docs/analysis_plan.md.
 """
 
 import sys
@@ -73,7 +80,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
-            "regrid-hafs", "window-obs", "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
+            "regrid-hafs", "window-obs", "plot-eyeball",
+            "plot-hafs-check", "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
 
 
 def parse_args(argv):
@@ -133,6 +141,12 @@ def dispatch(case, command):
     if command == "window-obs":
         from obs_windows import window_obs_case
         return window_obs_case(case)
+    if command == "plot-eyeball":
+        from eyeball_plots import plot_eyeball
+        return plot_eyeball(case)
+    if command == "plot-hafs-check":
+        from eyeball_plots import plot_hafs_check
+        return plot_hafs_check(case)
     if command == "download-obs":
         import obs_cases
         return obs_cases.download_obs(case)

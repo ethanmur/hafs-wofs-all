@@ -721,13 +721,46 @@ the window's mean, max and NaN-cell count.
 of the run); the missing hours line up with known outages. A product whose
 hourly regrid is incomplete shows up here as `missing_hours`.
 
-### D5b. Eyeball panels: WoFS | HAFS | truth
-Before any score is computed, look at the fields. One figure per (WoFS member
-or a fixed example member, HAFS cycle, window): three panels on the same grid
-and colour scale, so a regridding or pairing mistake shows up as a displaced
-or empty panel rather than as a strange FSS three steps later. Restricted to a
-few cycles and members by default; every pair would be thousands of figures.
-Panels are drawn unclipped with the validity region outlined.
+### D5b. Eyeball panels: WoFS | HAFS | truth (`eyeball_plots.py`)
+
+    python analysis/run.py storms/<case>.yaml plot-eyeball [--res-km N]
+    python analysis/run.py storms/<case>.yaml plot-hafs-check [--res-km N]
+
+Before any score is computed, look at the fields. `plot-eyeball` draws one
+figure per (window, HAFS cycle, WoFS member): three panels (WoFS member | HAFS
+cycle | truth) on the same grid and colour scale, so a regridding or pairing
+mistake shows up as a displaced or empty panel rather than as a strange FSS
+three steps later. It reads only the 3 h files the regrid steps wrote
+(`regrid-wofs`, `regrid-hafs`, `window-obs`), and refuses fields that are not on
+the same grid.
+
+Restricted by default, because every pair would be thousands of figures (the
+case's optional `eyeball:` block): `windows: 3` spread across the period
+(first, middle, last of those with WoFS, HAFS and truth), `cycles: 2` per HAFS
+configuration (the shortest-lead and the longest-lead cycle of the lookback),
+`members: [0, 9]` (WoFS member numbers; one not in the run is skipped). The WoFS
+panel is the run with the shortest lead for the window. Panels are drawn
+unclipped with the deployment outline and, when `build-mask` has run, the
+validity region outlined; the best track is drawn up to the window end.
+
+`plot-hafs-check` is the HAFS regrid's own look: for the same windows and
+cycles, the native 3 h bucket read straight from the parent file next to the
+regridded field, framed on the deployment domain, so a shifted, flipped or
+misread grid shows by eye even though the area-mean budget check would pass.
+The headline carries the budget change and the native/regridded maxima from the
+`regrid-hafs` CSV. A cycle whose parent domain misses the deployment draws an
+"unavailable" native panel.
+
+**Colour scale** (`eyeball.colorbar_style`): `true_scale` (default) is a log
+scale in inches from 0.01 to 5 in with 20 levels, the QPF ladder's colours
+blended into a continuous ramp, dry cells white, cells with no data grey, and
+values past 5 in on the open end of the bar; `standard` is the banded ladder
+(the existing QPF levels, shown in inches). Both are in `plot_common.py`
+(`precip_scale`, `draw_precip`) and used by `map_figure`'s `"precip"` style; the
+obs-regrid maps (`plot-regrid`) keep the banded scale unless switched.
+
+    figures/eyeball-panels/<dep>_<storm>/eyeball_<end>_<model>_c<cycle>_m<NN>.png
+    figures/hafs-regrid-checks/<dep>_<storm>/hafs_check_<end>_<model>_c<cycle>.png
 
 *Check:* subjective. A panel set that disagrees in placement means the
 regridding or window pairing is wrong; one that disagrees in amount is the

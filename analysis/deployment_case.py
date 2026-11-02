@@ -20,15 +20,17 @@ TOP_KEYS = {"storm_name", "storm_id", "deployment", "best_track",
             "truth_source", "wofs", "valid_start", "valid_end", "hafs",
             "grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
             "mrms_regrid_dir", "stage4_regrid_3h_dir", "mrms_regrid_3h_dir",
-            "regrid_plot_dir",
+            "regrid_plot_dir", "eyeball_plot_dir", "hafs_check_plot_dir",
             "mask_dir", "mask_plot_dir", "manifest_dir", "wofs_regrid_1h_dir",
             "wofs_regrid_3h_dir", "hafs_regrid_dir", "log_dir", "mrms_cache_dir",
-            "stage4_cache_dir", "grid", "regrid", "regrid_plots", "masks"}
+            "stage4_cache_dir", "grid", "regrid", "regrid_plots", "masks",
+            "eyeball"}
 # Where each kind of file goes. Similar files sit together, flat, under
 # data/ or figures/; there is no per-case output folder.
 PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
              "mrms_regrid_dir", "stage4_regrid_3h_dir", "mrms_regrid_3h_dir",
-             "regrid_plot_dir", "mask_dir", "mask_plot_dir", "manifest_dir",
+             "regrid_plot_dir", "eyeball_plot_dir", "hafs_check_plot_dir",
+             "mask_dir", "mask_plot_dir", "manifest_dir",
              "wofs_regrid_1h_dir", "wofs_regrid_3h_dir", "hafs_regrid_dir",
              "log_dir")
 MASK_KEYS = {"coast_buffer_km", "ne_scale"}
@@ -38,6 +40,8 @@ GRID_KEYS = {"res_km"}
 REGRID_KEYS = {"sources", "method", "width", "vld_thresh", "tolerance_pct",
                "met_bin_dir", "fields", "budget_check"}
 PLOT_KEYS = {"panels"}
+EYEBALL_KEYS = {"members", "windows", "cycles", "colorbar_style"}
+COLORBAR_STYLES = ("true_scale", "standard")
 PLOT_PANELS = ("compare-regrid", "compare-products", "compare-anomaly")
 
 
@@ -86,6 +90,18 @@ class RegridSettings:
 
 
 @dataclass
+class EyeballSettings:
+    """How much plot-eyeball and plot-hafs-check draw: every pair would be
+    thousands of figures, so only a few windows, HAFS cycles and WoFS members.
+    `windows` and `cycles` are counts, spread evenly (first, last, between);
+    `members` are WoFS member numbers."""
+    members: tuple = (0, 9)
+    windows: int = 3
+    cycles: int = 2
+    colorbar_style: str = "true_scale"
+
+
+@dataclass
 class DeploymentCase:
     case_slug: str
     storm_name: str
@@ -103,6 +119,8 @@ class DeploymentCase:
     stage4_regrid_3h_dir: Path  # data/stage-iv-regrid-3h/<dep>_<storm>/  Stage IV 3 h windows
     mrms_regrid_3h_dir: Path   # data/mrms-regrid-3h/<dep>_<storm>/      MRMS 3 h windows
     regrid_plot_dir: Path      # figures/regrid-obs-tests/<dep>_<storm>/
+    eyeball_plot_dir: Path     # figures/eyeball-panels/<dep>_<storm>/  WoFS | HAFS | truth
+    hafs_check_plot_dir: Path  # figures/hafs-regrid-checks/<dep>_<storm>/  HAFS native vs regridded
     mask_dir: Path             # data/obs-valid-masks/   <case>_obs_valid.nc
     mask_plot_dir: Path        # figures/obs-valid-masks/ <case>_obs_valid.png
     manifest_dir: Path         # data/window-manifests/ <case>_manifest.csv, _windows.csv
@@ -123,6 +141,7 @@ class DeploymentCase:
     regrid: RegridSettings = field(default_factory=RegridSettings)
     masks: MaskSettings = field(default_factory=MaskSettings)
     regrid_panels: tuple = ()               # empty = every panel
+    eyeball: EyeballSettings = field(default_factory=EyeballSettings)
 
     @property
     def output_slug(self):
@@ -289,6 +308,17 @@ def from_yaml(path, res_km=None, sources=None):
     _unknown(grid, GRID_KEYS, "grid")
     regrid = cfg.get("regrid") or {}
     _unknown(regrid, REGRID_KEYS, "regrid")
+    eyeball = cfg.get("eyeball") or {}
+    _unknown(eyeball, EYEBALL_KEYS, "eyeball")
+    style = str(eyeball.get("colorbar_style", "true_scale"))
+    if style not in COLORBAR_STYLES:
+        raise ValueError(f"eyeball.colorbar_style must be one of "
+                         f"{COLORBAR_STYLES}, got {style!r}")
+    members = tuple(int(m) for m in eyeball.get("members", (0, 9)))
+    if (not members or min(members) < 0
+            or int(eyeball.get("windows", 3)) < 1
+            or int(eyeball.get("cycles", 2)) < 1):
+        raise ValueError("eyeball needs members >= 0 and windows, cycles >= 1")
     plots = cfg.get("regrid_plots") or {}
     _unknown(plots, PLOT_KEYS, "regrid_plots")
     masks = cfg.get("masks") or {}
@@ -326,6 +356,9 @@ def from_yaml(path, res_km=None, sources=None):
         stage4_regrid_3h_dir=Path(cfg["stage4_regrid_3h_dir"]),
         mrms_regrid_3h_dir=Path(cfg["mrms_regrid_3h_dir"]),
         regrid_plot_dir=_resolution_dir(Path(cfg["regrid_plot_dir"]), res),
+        eyeball_plot_dir=_resolution_dir(Path(cfg["eyeball_plot_dir"]), res),
+        hafs_check_plot_dir=_resolution_dir(Path(cfg["hafs_check_plot_dir"]),
+                                            res),
         mask_dir=Path(cfg["mask_dir"]),
         mask_plot_dir=Path(cfg["mask_plot_dir"]),
         manifest_dir=Path(cfg["manifest_dir"]),
@@ -350,6 +383,9 @@ def from_yaml(path, res_km=None, sources=None):
                          if regrid.get("met_bin_dir") else None),
             fields=dict(regrid.get("fields") or {})),
         regrid_panels=panels,
+        eyeball=EyeballSettings(
+            members=members, windows=int(eyeball.get("windows", 3)),
+            cycles=int(eyeball.get("cycles", 2)), colorbar_style=style),
     )
     unknown_fields = set(case.regrid.fields) - set(TRUTH_SOURCES)
     if unknown_fields:

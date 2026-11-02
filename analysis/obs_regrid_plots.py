@@ -32,7 +32,8 @@ import cartopy.crs as ccrs
 
 from plot_units import inches
 from best_track import parse_bdeck, position_on_track
-from plot_common import add_us_geography, QPF_LEVELS, qpf_cmap
+from plot_common import (add_us_geography, QPF_LEVELS, qpf_cmap, draw_precip,
+                         DEFAULT_COLORBAR_STYLE)
 import met_regrid
 import verification_grid as vg
 import obs_cases as oc
@@ -192,10 +193,12 @@ def crop_slices(lat, lon, domain, max_cells=None):
 
 
 def map_figure(panels, domain, track_line, title, out_path,
-               overlays=None):
+               overlays=None, colorbar_style=None):
     """panels: [(panel_title, lat2d, lon2d, data_mm_or_None, style)], style
-    "qpf" or "diff". One horizontal colorbar under each run of same-style
-    panels; data None draws an "unavailable" panel."""
+    "qpf", "diff" or "precip". One horizontal colorbar under each run of
+    same-style panels; data None draws an "unavailable" panel. "precip" panels
+    use plot_common's scale (`colorbar_style`: true_scale, the default, or
+    standard); "qpf" is the banded ladder the obs-regrid maps use."""
     styles = _styles()
     lat_min, lat_max, lon_min, lon_max = domain
     map_h = PANEL_WIDTH_IN * (lat_max - lat_min) / (lon_max - lon_min)
@@ -218,23 +221,30 @@ def map_figure(panels, domain, track_line, title, out_path,
             ax.text(0.5, 0.5, "unavailable", ha="center", va="center",
                     transform=ax.transAxes)
             continue
-        s = styles[style]
-        mesh = ax.pcolormesh(lon, lat, np.ma.masked_invalid(inches(data)),
-                             cmap=s["cmap"], norm=s["norm"], shading="nearest",
-                             transform=ccrs.PlateCarree())
+        if style == "precip":
+            mesh, scale = draw_precip(ax, lon, lat, data,
+                                      colorbar_style or DEFAULT_COLORBAR_STYLE)
+            spec = dict(ticks=scale["ticks"], extend=scale["extend"],
+                        format=scale["format"], label="Precipitation (in)")
+        else:
+            s = styles[style]
+            mesh = ax.pcolormesh(lon, lat, np.ma.masked_invalid(inches(data)),
+                                 cmap=s["cmap"], norm=s["norm"],
+                                 shading="nearest",
+                                 transform=ccrs.PlateCarree())
+            spec = s
         if groups and groups[-1][0] == style:
             groups[-1][1].append(ax)
         else:
-            groups.append([style, [ax], mesh])
+            groups.append([style, [ax], mesh, spec])
 
-    for style, group_axes, mesh in groups:
+    for style, group_axes, mesh, s in groups:
         for ax in group_axes:
             ax.apply_aspect()   # GeoAxes shrink to the map's aspect at draw time
         x0 = group_axes[0].get_position().x0
         x1 = group_axes[-1].get_position().x1
         y0 = min(ax.get_position().y0 for ax in group_axes)
         cax = fig.add_axes([x0, y0 - 0.8 / fig_h, x1 - x0, 0.14 / fig_h])
-        s = styles[style]
         fig.colorbar(mesh, cax=cax, orientation="horizontal", ticks=s["ticks"],
                      extend=s["extend"], label=s["label"], format=s["format"])
         extra.append(cax)

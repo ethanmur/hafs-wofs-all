@@ -41,6 +41,8 @@ mrms_regrid_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms-regrid/20241
 stage4_regrid_3h_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv-regrid-3h/20241009_d1_milton/
 mrms_regrid_3h_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms-regrid-3h/20241009_d1_milton/
 regrid_plot_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-obs-tests/20241009_d1_milton/
+eyeball_plot_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/eyeball-panels/20241009_d1_milton/
+hafs_check_plot_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/hafs-regrid-checks/20241009_d1_milton/
 manifest_dir:    /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/window-manifests/
 wofs_regrid_1h_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/wofs-regrid-1h/20241009_d1_milton/
 wofs_regrid_3h_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/wofs-regrid-3h/20241009_d1_milton/
