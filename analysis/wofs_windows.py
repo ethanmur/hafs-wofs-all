@@ -167,9 +167,12 @@ def write_native_input(path, data_mm, grid_attrs):
         nc.createDimension("ne", ne)
         nc.createDimension("lat", ny)
         nc.createDimension("lon", nx)
+        # MET's own missing value, not NaN: a NaN _FillValue made MET read the
+        # whole plane as missing (input range -9999 to -9999) on Orion.
         var = nc.createVariable(VAR, "f4", ("ne", "lat", "lon"),
-                                fill_value=np.float32(np.nan))
-        var[:] = data_mm.astype("f4")
+                                fill_value=np.float32(met_regrid.MET_MISSING))
+        var[:] = np.where(np.isnan(data_mm), met_regrid.MET_MISSING,
+                          data_mm).astype("f4")
         var.long_name = "WoFS accumulated rainfall, one field per member"
         var.units = "mm"
         for key, value in grid_attrs.items():
