@@ -19,14 +19,15 @@ TRUTH_SOURCES = ("stage4", "mrms")
 TOP_KEYS = {"storm_name", "storm_id", "deployment", "best_track",
             "truth_source", "wofs", "valid_start", "valid_end", "hafs",
             "grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
-            "mrms_regrid_dir", "regrid_plot_dir",
+            "mrms_regrid_dir", "stage4_regrid_3h_dir", "mrms_regrid_3h_dir",
+            "regrid_plot_dir",
             "mask_dir", "mask_plot_dir", "manifest_dir", "wofs_regrid_1h_dir",
             "wofs_regrid_3h_dir", "hafs_regrid_dir", "log_dir", "mrms_cache_dir",
             "stage4_cache_dir", "grid", "regrid", "regrid_plots", "masks"}
 # Where each kind of file goes. Similar files sit together, flat, under
 # data/ or figures/; there is no per-case output folder.
 PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
-             "mrms_regrid_dir",
+             "mrms_regrid_dir", "stage4_regrid_3h_dir", "mrms_regrid_3h_dir",
              "regrid_plot_dir", "mask_dir", "mask_plot_dir", "manifest_dir",
              "wofs_regrid_1h_dir", "wofs_regrid_3h_dir", "hafs_regrid_dir",
              "log_dir")
@@ -99,6 +100,8 @@ class DeploymentCase:
     grid_plot_dir: Path        # figures/regrid-wofs/    <case>_grid.png
     stage4_regrid_dir: Path    # data/stage-iv-regrid/<dep>_<storm>/  Stage IV + its CSV
     mrms_regrid_dir: Path      # data/mrms-regrid/<dep>_<storm>/      MRMS + its CSV
+    stage4_regrid_3h_dir: Path  # data/stage-iv-regrid-3h/<dep>_<storm>/  Stage IV 3 h windows
+    mrms_regrid_3h_dir: Path   # data/mrms-regrid-3h/<dep>_<storm>/      MRMS 3 h windows
     regrid_plot_dir: Path      # figures/regrid-obs-tests/<dep>_<storm>/
     mask_dir: Path             # data/obs-valid-masks/   <case>_obs_valid.nc
     mask_plot_dir: Path        # figures/obs-valid-masks/ <case>_obs_valid.png
@@ -220,6 +223,23 @@ class DeploymentCase:
         return {"stage4": self.stage4_regrid_dir,
                 "mrms": self.mrms_regrid_dir}[source]
 
+    def regrid_3h_dir_for(self, source):
+        """The folder holding one obs product's 3 h window sums."""
+        return {"stage4": self.stage4_regrid_3h_dir,
+                "mrms": self.mrms_regrid_3h_dir}[source]
+
+    def obs_window_path(self, source, end):
+        """One obs 3 h window (the three hourly files ending at `end`) on the
+        grid. Named like the hourly files; the folder says it is 3 h."""
+        return self.regrid_3h_dir_for(source) / (
+            f"{end:%Y%m%d%H}_{source}_{self.res_label}.nc")
+
+    def obs_window_csv_path(self, source):
+        """The window sums and what was missing, beside the files."""
+        return self.regrid_3h_dir_for(source) / (
+            f"window_sums_{self.valid_start:%Y%m%d%H}_"
+            f"{self.valid_end:%Y%m%d%H}{self.res_suffix}.csv")
+
     def budget_csv_path(self, source=None):
         """One product's conservation check, beside the files it describes
         (default: the truth product)."""
@@ -303,6 +323,8 @@ def from_yaml(path, res_km=None, sources=None):
         grid_plot_dir=Path(cfg["grid_plot_dir"]),
         stage4_regrid_dir=Path(cfg["stage4_regrid_dir"]),
         mrms_regrid_dir=Path(cfg["mrms_regrid_dir"]),
+        stage4_regrid_3h_dir=Path(cfg["stage4_regrid_3h_dir"]),
+        mrms_regrid_3h_dir=Path(cfg["mrms_regrid_3h_dir"]),
         regrid_plot_dir=_resolution_dir(Path(cfg["regrid_plot_dir"]), res),
         mask_dir=Path(cfg["mask_dir"]),
         mask_plot_dir=Path(cfg["mask_plot_dir"]),

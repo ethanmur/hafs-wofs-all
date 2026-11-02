@@ -629,31 +629,65 @@ output reads back as `name="rain_mm_m03"; level="(*,*)"`.
 *MET:* `regrid_data_plane`.
 
 ### D4. HAFS 3 h windows on the deployment grid (`hafs_windows.py`)
+
+    python analysis/run.py storms/<case>.yaml regrid-hafs [--res-km N]
+
 `regrid_data_plane` takes `-field 'name="APCP"; level="A3";'` and selects the
 bucket out of the native parent file, so the pass is: read the HAFS file,
-write the 6 km field. No `pcp_combine`, and no intermediate APCP-only GRIB2:
-each source file holds exactly one bucket for exactly one window, so
+write the 3 h field on the grid. No `pcp_combine`, and no intermediate APCP-only
+GRIB2: each source file holds exactly one bucket for exactly one window, so
 extracting first is read-big, write-small, read-small instead of read-big.
-(Extraction is still worth it for archiving; the
-`wgrib2 -match ":APCP:surface:${start}-${lead} hour acc fcst:"` recipe matches
-the literal interval so the run total is excluded.)
+Units are kg m-2, which is mm, so nothing is converted. Same method, width and
+grid spec as the obs and WoFS regrids.
 
-Which cycle covers which window comes from D2, including the rule that a HAFS
-run can only serve windows made of whole 3 h buckets. The file holding a window
-is the one named for the bucket's *end*: the 15–18Z accumulation from an
-18Z-prior init is `21-24 hour acc fcst` in the **f024** file, not f021.
+**Work list.** Read from the D6 manifest: every HAFS row with status
+`complete` in a window that has a complete WoFS run (`testable` or
+`wofs_only`; `no_wofs` windows are skipped). The file holding a window is the
+one named for the bucket's *end*: the 15-18Z accumulation of an 18Z-prior
+cycle is `21-24 hour acc fcst` in the **f024** file, not f021. A cycle is
+strictly before the window start, so the earliest bucket is f006 and f003
+(where the bucket and the run total are the same interval) is never read.
 
-`budget_check: true` (default) runs the mass comparison; it costs a full scan
-of each native file, so it is the one knob to turn off for a production re-run.
-HAFS configurations (A, B) are separate model labels.
+**Output.** One folder per configuration, files named like the WoFS files
+(valid end, cycle, model, resolution), one variable `precip` (mm) so
+`grid_stat` reads it as it reads the obs (`name="precip"; level="(*,*)"`):
 
-*Check:* `hafs_windows_<case>.csv`, one row per (cycle, window) with its source
-file, status and mass columns. Rows marked `missing_source` are cycles D2
-expected but that are not on disk.
+    data/hafs-regrid/20241009_d1_milton_HFSA/2024100921_i202410091200_hfsa_6km.nc
+    data/hafs-regrid/20241009_d1_milton_HFSA/regrid_settings_6km.txt
+    data/hafs-regrid/20241009_d1_milton_HFSA/regrid_budget_<start>_<end>.csv
+
+`hafs_regrid_dir` in the case YAML is `data/hafs-regrid/<dep>_<storm>/`; the
+code appends `_HFSA` / `_HFSB`, so the two configurations never share a folder,
+a settings record or a budget CSV. Another resolution adds `_<N>km` to the file
+names, as everywhere. Existing files are reused and their earlier budget rows
+carried into the new CSV.
+
+**Budget check** (`regrid.budget_check`, default true): the bucket is also read
+natively (eccodes, selected by interval, finest grid) and MET's area-weighted
+mean over the cells it covers is compared with an exact box average of the
+native field, the same `budget_row` as `regrid-obs`; flagged when
+|diff| > `tolerance_pct` (2%) and > 0.01 mm. It costs a full scan of each native
+file, so it is the one knob to turn off for a production rerun
+(`regrid: {budget_check: false}`). With it on, a cycle whose file lacks the 3 h
+bucket (`no_bucket`) or whose domain does not overlap the deployment grid
+(`no_overlap`) is a CSV row and no file, instead of a failed MET call; a MET
+failure on a populated file still stops the run.
+
+*Check:* `regrid_budget_*.csv` per configuration: one row per (cycle, window)
+with its source file, status and mass columns; the run ends with the number of
+flagged rows. Rows the manifest marks `no_cycle` / `short_run` never get this
+far, so they appear only in the manifest.
 
 *MET:* `regrid_data_plane` (BUDGET).
 
-### D5. Obs 3 h windows
+*Open (Orion):* MET reading the parent GRIB2 with `level="A3"` (selects the
+3 h bucket, not the run total) and the HAFS parent grid's overlap with each
+deployment; the budget check is what would show either going wrong.
+
+### D5. Obs 3 h windows (`obs_windows.py`)
+
+    python analysis/run.py storms/<case>.yaml window-obs [--res-km N] [--sources mrms]
+
 Sum the already-regridded hourly truth into the same clock windows; a missing
 hour makes the window missing. No rescaling: a 2 h total is not a 3 h total,
 and pretending otherwise biases every threshold. The hourly files are stamped
@@ -661,10 +695,31 @@ at the END of their hour, so the window (15Z, 18Z] is the 16Z, 17Z and 18Z
 files. An off-by-one here shifts the whole verification an hour.
 
 Done in numpy rather than with `pcp_combine`: the hourly obs are MET NetCDF on
-the grid already, so the window is three arrays added.
+the grid already, so the window is three arrays added. A cell missing in any of
+the three hours is missing in the window (the rule the WoFS sums follow); an
+hourly file with no data in it counts as a missing hour. The window file is a
+copy of its last hourly file with `precip` replaced, so it keeps MET's grid
+attributes and `grid_stat` reads it like the hourly obs
+(`name="precip"; level="(*,*)"`); global attributes record the window start,
+valid time and the hours summed.
 
-*Check:* count of valid obs windows vs expected; missing ones line up with
-known outages.
+Windows are every clock window between `valid_start` and `valid_end` (the same
+set the manifest uses), for each product in `regrid.sources` (`--sources`
+overrides). One folder per product and deployment, one file per window named
+for its end, and one CSV:
+
+    data/mrms-regrid-3h/20241009_d1_milton/2024101000_mrms_6km.nc
+    data/mrms-regrid-3h/20241009_d1_milton/window_sums_<start>_<end>.csv
+    data/stage-iv-regrid-3h/20241009_d1_milton/...        (same, for Stage IV)
+
+Another resolution adds `_<N>km` to the file and CSV names. Existing windows are
+reused. The CSV has one row per window: `status` (`written`, `cached`,
+`missing_hours`), `hours_found` (e.g. `2/3`), `missing_hours` (the stamps), and
+the window's mean, max and NaN-cell count.
+
+*Check:* count of valid obs windows vs expected (printed per product at the end
+of the run); the missing hours line up with known outages. A product whose
+hourly regrid is incomplete shows up here as `missing_hours`.
 
 ### D5b. Eyeball panels: WoFS | HAFS | truth
 Before any score is computed, look at the fields. One figure per (WoFS member

@@ -38,6 +38,8 @@ grid_json_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/json-grids/
 grid_plot_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-wofs/
 stage4_regrid_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv-regrid/20230820_d2_hilary/
 mrms_regrid_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms-regrid/20230820_d2_hilary/
+stage4_regrid_3h_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/stage-iv-regrid-3h/20230820_d2_hilary/
+mrms_regrid_3h_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/mrms-regrid-3h/20230820_d2_hilary/
 regrid_plot_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-obs-tests/20230820_d2_hilary/
 manifest_dir:    /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/window-manifests/
 wofs_regrid_1h_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/wofs-regrid-1h/20230820_d2_hilary/

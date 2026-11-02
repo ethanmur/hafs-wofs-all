@@ -33,6 +33,11 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 Each file is checked against an exact box average of the
                 native bucket unless regrid.budget_check is false. Needs
                 build-grid, `module load met` and eccodes
+  window-obs    sum the regridded hourly obs into the 3 h clock windows: window
+                (15Z, 18Z] is the 16Z, 17Z, 18Z files (stamped at the end of
+                the hour). One file per window and product in
+                <mrms_regrid_3h_dir> / <stage4_regrid_3h_dir>; a window with
+                an hour missing is missing, not rescaled. Needs regrid-obs
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself
@@ -58,7 +63,8 @@ Resolution is 6 km unless a case sets grid.res_km or the run passes --res-km;
 only a non-default resolution adds its label to output names, so the default
 run's files never move.
 
-The 3 h truth windows follow in the rest of plan phase D (see docs/analysis_plan.md).
+The rest of plan phase D (the eyeball panels, D5b) follows; see
+docs/analysis_plan.md.
 """
 
 import sys
@@ -67,7 +73,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
-            "regrid-hafs", "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
+            "regrid-hafs", "window-obs", "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
 
 
 def parse_args(argv):
@@ -124,6 +130,9 @@ def dispatch(case, command):
     if command == "regrid-hafs":
         from hafs_windows import regrid_hafs_case
         return regrid_hafs_case(case)
+    if command == "window-obs":
+        from obs_windows import window_obs_case
+        return window_obs_case(case)
     if command == "download-obs":
         import obs_cases
         return obs_cases.download_obs(case)
