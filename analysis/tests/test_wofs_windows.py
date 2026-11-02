@@ -130,7 +130,8 @@ def test_staged_input_is_laid_out_like_a_wofs_file_with_its_grid_attributes(
         tmp_path):
     import netCDF4
     attrs = ww.native_grid_attrs(dict(GRID, Projection="Lambert Conformal",
-                                      hemisphere="N", cape="ignore me"))
+                                      hemisphere="N", cape="ignore me",
+                                      x_pin=1, y_pin=1))
     assert "Projection" in attrs and "cape" not in attrs
     data = np.random.default_rng(3).random((3, 4, 4))
     path = ww.write_native_input(tmp_path / "s" / "in.nc", data, attrs)
@@ -139,6 +140,8 @@ def test_staged_input_is_laid_out_like_a_wofs_file_with_its_grid_attributes(
         assert set(nc.variables) == {ww.VAR}            # no coordinate arrays
         assert nc.Projection == "Lambert Conformal" and nc.nx == "4"
         assert nc.variables[ww.VAR].units == "mm"
+        assert nc.MET_version.startswith("V")           # modern MET grid parser
+        assert float(nc.x_pin) == 0 and float(nc.y_pin) == 0    # 0-based, as MET writes
         assert np.allclose(nc.variables[ww.VAR][:], data, atol=1e-5)
 
 

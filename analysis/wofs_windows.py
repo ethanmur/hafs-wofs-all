@@ -177,6 +177,13 @@ def write_native_input(path, data_mm, grid_attrs):
         var.units = "mm"
         for key, value in grid_attrs.items():
             setattr(nc, key, value)
+        # Without MET_version MET falls back to its METv2.0 grid parser and
+        # puts the grid at the wrong place. WoFS counts x_pin / y_pin from 1;
+        # MET's own files (and MET_version >= 3 readers) count from 0.
+        nc.MET_version = "V12.2.0"
+        for key in ("x_pin", "y_pin"):
+            if key in grid_attrs:
+                setattr(nc, key, f"{float(grid_attrs[key]) - 1:.6f}")
     return path
 
 
