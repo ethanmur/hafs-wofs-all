@@ -226,12 +226,17 @@ def regrid_one(tool, cfg, data_mm, grid_attrs, out_path, init, end, hours):
 # Driver
 # =============================================================================
 
-def _config(case, hours, spec_string, name):
+def _config(case, hours, spec_string, name, n=2):
+    """MET settings for one accumulation length. When the verification grid is
+    WoFS's own (`n` == 1) nothing needs averaging, and BUDGET width 2 would
+    average a 2 x 2 box that runs off the far edge (a missing row and column,
+    mean +0.67% on 300 x 300), so use an exact nearest-neighbour copy."""
     s = case.regrid
+    method, width = (s.method, s.width) if n > 1 else ("NEAREST", 1)
     return met_regrid.RegridConfig(
         cache_dir=case.wofs_regrid_dir(hours), grid_spec=spec_string,
         grid_name=name or case.case_slug, res_label=case.res_label,
-        method=s.method, width=s.width, vld_thresh=s.vld_thresh,
+        method=method, width=width, vld_thresh=s.vld_thresh,
         tolerance_pct=s.tolerance_pct, met_bin_dir=s.met_bin_dir)
 
 
@@ -280,7 +285,7 @@ def regrid_wofs_case(case):
     pairs = sorted(wm.wofs_complete_pairs(manifest.rows),
                    key=lambda p: (p[1].end, p[0]))
     init_dirs = {i.init_dt: i.path for i in dep.inits}
-    cfgs = {h: _config(case, h, spec_string, grid_name) for h in (1, 3)}
+    cfgs = {h: _config(case, h, spec_string, grid_name, n) for h in (1, 3)}
     print(f"Grid   : {spec.nx} x {spec.ny} @ {spec.res_km:g} km  "
           f"({n} x {n} WoFS cells each); MET {cfgs[3].method}, width "
           f"{cfgs[3].width}")
