@@ -42,6 +42,7 @@ regrid_plot_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/regrid-obs-tes
 manifest_dir:    /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/window-manifests/
 wofs_regrid_1h_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/wofs-regrid-1h/20240708_d1_beryl/
 wofs_regrid_3h_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/wofs-regrid-3h/20240708_d1_beryl/
+hafs_regrid_dir: /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs-regrid/20240708_d1_beryl/
 mask_dir:        /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/obs-valid-masks/
 mask_plot_dir:   /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/figures/obs-valid-masks/
 log_dir:         /work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/logs/

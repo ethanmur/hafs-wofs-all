@@ -25,6 +25,14 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 the 1 h and 3 h accumulations in <wofs_regrid_1h_dir> and
                 <wofs_regrid_3h_dir>; each is checked against the exact block
                 mean. Needs build-grid and `module load met`
+  regrid-hafs   for every HAFS (cycle, 3 h window) the manifest lists as
+                complete for a window with a WoFS run: regrid the f-hour 3 h
+                bucket (level A3) of the native parent file onto the
+                verification grid with MET, one file per (cycle, window) in
+                <hafs_regrid_dir>_<HFSA|HFSB>, named like the WoFS files.
+                Each file is checked against an exact box average of the
+                native bucket unless regrid.budget_check is false. Needs
+                build-grid, `module load met` and eccodes
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself
@@ -50,8 +58,7 @@ Resolution is 6 km unless a case sets grid.res_km or the run passes --res-km;
 only a non-default resolution adds its label to output names, so the default
 run's files never move.
 
-The HAFS window regrid and the 3 h truth windows follow in the rest of plan
-phase D (see docs/analysis_plan.md).
+The 3 h truth windows follow in the rest of plan phase D (see docs/analysis_plan.md).
 """
 
 import sys
@@ -60,7 +67,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
-            "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
+            "regrid-hafs", "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
 
 
 def parse_args(argv):
@@ -114,6 +121,9 @@ def dispatch(case, command):
     if command == "regrid-wofs":
         from wofs_windows import regrid_wofs_case
         return regrid_wofs_case(case)
+    if command == "regrid-hafs":
+        from hafs_windows import regrid_hafs_case
+        return regrid_hafs_case(case)
     if command == "download-obs":
         import obs_cases
         return obs_cases.download_obs(case)

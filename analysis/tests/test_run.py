@@ -68,7 +68,7 @@ def test_parse_args_rejects_removed_commands():
     # HAFS-only products, and commands waiting for their plan steps (C, D)
     for command in ("parent", "ets", "rmse", "cycles", "cycles-compare", "all",
                     "compare", "replot", "build-masks", "plot-masked",
-                    "list-windows", "regrid-hafs", "plot-hafs"):
+                    "list-windows", "plot-hafs"):
         try:
             run.parse_args(["case.yaml", command])
             assert False, f"{command} should be rejected"

@@ -21,20 +21,21 @@ TOP_KEYS = {"storm_name", "storm_id", "deployment", "best_track",
             "grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
             "mrms_regrid_dir", "regrid_plot_dir",
             "mask_dir", "mask_plot_dir", "manifest_dir", "wofs_regrid_1h_dir",
-            "wofs_regrid_3h_dir", "log_dir", "mrms_cache_dir",
+            "wofs_regrid_3h_dir", "hafs_regrid_dir", "log_dir", "mrms_cache_dir",
             "stage4_cache_dir", "grid", "regrid", "regrid_plots", "masks"}
 # Where each kind of file goes. Similar files sit together, flat, under
 # data/ or figures/; there is no per-case output folder.
 PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
              "mrms_regrid_dir",
              "regrid_plot_dir", "mask_dir", "mask_plot_dir", "manifest_dir",
-             "wofs_regrid_1h_dir", "wofs_regrid_3h_dir", "log_dir")
+             "wofs_regrid_1h_dir", "wofs_regrid_3h_dir", "hafs_regrid_dir",
+             "log_dir")
 MASK_KEYS = {"coast_buffer_km", "ne_scale"}
 WOFS_KEYS = {"root", "available", "complete_windows"}
 HAFS_KEYS = {"lookback_h", "min_members", "init_start", "init_end", "models"}
 GRID_KEYS = {"res_km"}
 REGRID_KEYS = {"sources", "method", "width", "vld_thresh", "tolerance_pct",
-               "met_bin_dir", "fields"}
+               "met_bin_dir", "fields", "budget_check"}
 PLOT_KEYS = {"panels"}
 PLOT_PANELS = ("compare-regrid", "compare-products", "compare-anomaly")
 
@@ -80,6 +81,7 @@ class RegridSettings:
     tolerance_pct: float = 2.0
     met_bin_dir: Optional[Path] = None
     fields: dict = field(default_factory=dict)
+    budget_check: bool = True     # regrid-hafs: compare each file with its source
 
 
 @dataclass
@@ -103,6 +105,7 @@ class DeploymentCase:
     manifest_dir: Path         # data/window-manifests/ <case>_manifest.csv, _windows.csv
     wofs_regrid_1h_dir: Path   # data/wofs-regrid-1h/<dep>_<storm>/  WoFS 1 h accumulations
     wofs_regrid_3h_dir: Path   # data/wofs-regrid-3h/<dep>_<storm>/  WoFS 3 h accumulations
+    hafs_regrid_dir: Path      # data/hafs-regrid/<dep>_<storm>/  + _<CONFIG> per HAFS configuration
     log_dir: Path              # data/logs/
     mrms_cache_dir: Path
     stage4_cache_dir: Path
@@ -176,6 +179,27 @@ class DeploymentCase:
     def wofs_budget_csv_path(self, hours=3):
         """The WoFS regrid check, beside the files it describes."""
         return self.wofs_regrid_dir(hours) / (
+            f"regrid_budget_{self.valid_start:%Y%m%d%H}_"
+            f"{self.valid_end:%Y%m%d%H}{self.res_suffix}.csv")
+
+    def hafs_regrid_dir_for(self, config):
+        """One HAFS configuration's folder: the YAML's hafs_regrid_dir with the
+        configuration appended (20241009_d1_milton_HFSA), so HFSA and HFSB
+        never share a folder, a settings record or a budget CSV."""
+        base = self.hafs_regrid_dir
+        return base.with_name(f"{base.name}_{config.upper()}")
+
+    def hafs_window_path(self, config, end, init):
+        """One HAFS (cycle, 3 h window ending at `end`) on the grid. Named like
+        the WoFS files: the valid end, the cycle, the model and the
+        resolution."""
+        return self.hafs_regrid_dir_for(config) / (
+            f"{end:%Y%m%d%H}_i{init:%Y%m%d%H%M}_{config.lower()}_"
+            f"{self.res_label}.nc")
+
+    def hafs_budget_csv_path(self, config):
+        """The HAFS regrid check, beside the files it describes."""
+        return self.hafs_regrid_dir_for(config) / (
             f"regrid_budget_{self.valid_start:%Y%m%d%H}_"
             f"{self.valid_end:%Y%m%d%H}{self.res_suffix}.csv")
 
@@ -285,6 +309,7 @@ def from_yaml(path, res_km=None, sources=None):
         manifest_dir=Path(cfg["manifest_dir"]),
         wofs_regrid_1h_dir=Path(cfg["wofs_regrid_1h_dir"]),
         wofs_regrid_3h_dir=Path(cfg["wofs_regrid_3h_dir"]),
+        hafs_regrid_dir=Path(cfg["hafs_regrid_dir"]),
         masks=MaskSettings(
             coast_buffer_km=float(masks.get("coast_buffer_km", 150.0)),
             ne_scale=str(masks.get("ne_scale", "50m"))),
@@ -298,6 +323,7 @@ def from_yaml(path, res_km=None, sources=None):
             width=int(regrid.get("width", 2)),
             vld_thresh=float(regrid.get("vld_thresh", 0.5)),
             tolerance_pct=float(regrid.get("tolerance_pct", 2.0)),
+            budget_check=bool(regrid.get("budget_check", True)),
             met_bin_dir=(Path(regrid["met_bin_dir"])
                          if regrid.get("met_bin_dir") else None),
             fields=dict(regrid.get("fields") or {})),
