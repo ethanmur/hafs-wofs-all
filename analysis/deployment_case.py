@@ -175,6 +175,13 @@ class DeploymentCase:
         return self.mask_plot_dir / (
             f"{self.case_slug}{self.res_suffix}_obs_valid.png")
 
+    def mask_check_path(self, end=None):
+        """plot-mask-check figures, beside the mask map: one per window
+        (named for its end), or the all-windows coverage summary."""
+        tag = "coverage" if end is None else f"{end:%Y%m%d%H}"
+        return self.mask_plot_dir / (
+            f"{self.case_slug}{self.res_suffix}_mask_check_{tag}.png")
+
     @property
     def manifest_path(self):
         """Every (window, model run) and what is on disk for it. Windows do

@@ -46,6 +46,12 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 HAFS native 3 h bucket next to its regridded field for the
                 same few windows and cycles, into <hafs_check_plot_dir>, to
                 catch a regrid that went wrong. Needs regrid-hafs
+  plot-mask-check
+                the validity mask against the truth 3 h windows: which cells
+                the mask keeps, discards or leaves with no truth, per window
+                and over all of them, plus a check that MET's gen_vx_mask
+                reads the mask file. Figures beside the mask map. Needs
+                build-mask and window-obs
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself
@@ -81,7 +87,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
             "regrid-hafs", "window-obs", "plot-eyeball",
-            "plot-hafs-check", "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
+            "plot-hafs-check", "plot-mask-check", "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
 
 
 def parse_args(argv):
@@ -147,6 +153,9 @@ def dispatch(case, command):
     if command == "plot-hafs-check":
         from eyeball_plots import plot_hafs_check
         return plot_hafs_check(case)
+    if command == "plot-mask-check":
+        from mask_check import plot_mask_check
+        return plot_mask_check(case)
     if command == "download-obs":
         import obs_cases
         return obs_cases.download_obs(case)

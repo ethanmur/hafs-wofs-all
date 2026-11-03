@@ -821,17 +821,33 @@ in the grid spec. The old per-cycle swath is also named in this plan's history
 
 *Check:* grep finds none outside those; tests pass.
 
-### E0b. Mask check by spatial plot
-Before any statistics, look at the mask where `grid_stat` will use it. For one
-case per storm, plot the `obs_valid` field as MET reads it (the mask NetCDF
-through `regrid_data_plane`, onto the verification grid) beside a 3 h MRMS
-window, with the cells the mask removes outlined. Confirm: the mask covers the
-deployment domain's land and the 150 km offshore band; detached islands are cut;
-no cell with MRMS data is masked off, and no masked-in cell is missing truth
-outside real radar gaps. Hilary's inland West domains and Milton's Florida
-coast are the cases to read first.
+### E0b. Mask check by spatial plot (`mask_check.py`)
 
-*Check:* by eye, per storm; any disagreement is fixed in `masks.py` before E1.
+    python analysis/run.py storms/<case>.yaml plot-mask-check --res-km 3
+
+Before any statistics, look at the mask against the real truth. Every cell of a
+3 h MRMS window is one of: **kept** (in the mask, truth present: what `grid_stat`
+will score), **discarded** (outside the mask, truth present), **gap** (in the
+mask, truth missing) or outside with no truth. Written beside the mask map in
+`figures/obs-valid-masks/`:
+
+- `<case>_3km_mask_check_<end>.png`, a few windows spread across the period
+  (`eyeball.windows`): truth | the four classes | truth inside the mask as scored
+- `<case>_3km_mask_check_coverage.png`, over every window: how often in-mask
+  cells lack truth, and how often out-of-mask cells have it
+
+The run prints the counts per window and the cells that never have truth inside
+the mask. It also hands the mask file to MET's `gen_vx_mask` on the truth
+window's grid and reports how many cells MET reads differently from the file,
+the one place a bad grid attribute in the NetCDF (the C1 caveat) would show.
+Needs `build-mask`, `window-obs` and `module load met`; without MET the plots
+still draw and the read-back is skipped.
+
+Read it as: the discarded cells are a thin offshore or foreign rim, the gaps are
+real radar holes (not coastlines), and MET reports 0 differing cells. Hilary's
+inland West domains and Milton's Florida coast first.
+
+*Check:* by eye, per storm; a disagreement is fixed in `masks.py` before E1.
 
 ### E1. `grid_stat` configuration
 - resolution: run at one resolution, the 3 km grid. Every output name carries
