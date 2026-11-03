@@ -42,6 +42,9 @@ args = sys.argv
 if "{mode}" == "fail":
     sys.stderr.write("ERROR: bad config\\n")
     sys.exit(1)
+if "{mode}" == "failm03" and os.environ["FCST_NAME"].endswith("m03"):
+    sys.stderr.write("ERROR: member 3 broke\\n")
+    sys.exit(1)
 conf = open(args[3]).read()
 outdir = args[args.index("-outdir") + 1]
 prefix = os.environ["OUT_PREFIX"]
@@ -85,7 +88,7 @@ open(os.path.join(outdir, name), "w").write("\\n".join(lines) + "\\n")
 
 def fake_tools(tmp_path, mode="ok"):
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
+    bin_dir.mkdir(parents=True, exist_ok=True)
     for name, text in (("gen_vx_mask", FAKE_VX), ("grid_stat", FAKE_GS)):
         tool = bin_dir / name
         tool.write_text(text.format(python=sys.executable, mode=mode,
@@ -288,3 +291,159 @@ def test_missing_mask_or_an_unavailable_case_stops(tmp_path):
 def test_it_is_a_command():
     import run
     assert run.parse_args(["c.yaml", "grid-stat-test"])[1] == "grid-stat-test"
+
+
+# --- E2: every window, every run --------------------------------------------
+
+def _calls(tmp_path):
+    path = tmp_path / "bin" / "calls.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()
+            ] if path.exists() else []
+
+
+def test_work_list_is_every_member_of_every_init_and_every_cycle(tmp_path):
+    case = _case(tmp_path)
+    jobs, skipped = gw.work_list(case)
+    assert skipped == []
+    # per window: 2 WoFS inits x 12 members + 2 configs x 4 cycles
+    assert len(jobs) == 2 * (24 + 8)
+    ends = {j.window.end for j in jobs}
+    assert ends == {T(2024, 7, 8, 21), T(2024, 7, 9, 0)}
+    tags = {j.tag for j in jobs if j.window.end == T(2024, 7, 8, 21)}
+    assert "wofs_m11_i202407081700" in tags and "wofs_m00_i202407081800" in tags
+    assert "hfsb_c2024070700" in tags and "hfsa_c2024070812" in tags
+    assert len(tags) == 32
+    wofs = [j for j in jobs if j.tag.startswith("wofs")]
+    assert {j.name for j in wofs} == {f"rain_mm_m{m:02d}" for m in range(12)}
+    assert all(j.name == "precip" for j in jobs if j.tag.startswith("hfs"))
+    assert all(j.out_dir == case.grid_stat_window_dir(j.window.end)
+               for j in jobs)
+
+
+def test_a_window_without_truth_is_skipped_and_named(tmp_path, capsys):
+    case = _case(tmp_path)
+    case.obs_window_path("mrms", T(2024, 7, 9, 0)).unlink()
+    jobs, skipped = gw.work_list(case)
+    assert [w.end for w in skipped] == [T(2024, 7, 9, 0)]
+    assert {j.window.end for j in jobs} == {T(2024, 7, 8, 21)}
+    gw.grid_stat_case(case)
+    assert "Skipped: 1 windows with no MRMS file" in capsys.readouterr().out
+
+
+def test_worker_count_reads_the_environment(monkeypatch):
+    monkeypatch.delenv("GRID_STAT_WORKERS", raising=False)
+    monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
+    assert gw.worker_count() == 1
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "8")
+    assert gw.worker_count() == 8
+    monkeypatch.setenv("GRID_STAT_WORKERS", "3")
+    assert gw.worker_count() == 3
+    monkeypatch.setenv("GRID_STAT_WORKERS", "zero")
+    assert gw.worker_count() == 8
+
+
+def test_every_run_is_scored_and_listed(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("GRID_STAT_WORKERS", "4")
+    case = _case(tmp_path)
+    stats = gw.grid_stat_case(case)
+    out = capsys.readouterr().out
+    assert len(stats) == 64 and all(p.exists() for p in stats)
+    assert len(_calls(tmp_path)) == 64
+    assert {c["prefix"] for c in _calls(tmp_path)} == {
+        p.name.split("_000000L")[0].split("_030000L")[0][len("grid_stat_"):]
+        for p in stats}
+    assert "64 runs over 2 windows" in out and "4 at a time" in out
+    assert "64 done, 0 already done, 0 failed" in out
+    import csv
+    with open(case.grid_stat_runs_path) as fh:
+        rows = list(csv.DictReader(fh))
+    assert len(rows) == 64
+    assert {r["status"] for r in rows} == {"done"}
+    assert {r["window_end"] for r in rows} == {"2024070821", "2024070900"}
+    assert all(r["stat_file"].endswith(".stat") for r in rows)
+    # the files sit in the window folders, mask is the one MET file
+    assert {p.parent for p in stats} == {
+        case.grid_stat_window_dir(T(2024, 7, 8, 21)),
+        case.grid_stat_window_dir(T(2024, 7, 9, 0))}
+
+
+def test_a_rerun_skips_finished_runs(tmp_path, capsys):
+    case = _case(tmp_path)
+    gw.grid_stat_case(case)
+    assert len(_calls(tmp_path)) == 64
+    capsys.readouterr()
+    gw.grid_stat_case(case)
+    out = capsys.readouterr().out
+    assert len(_calls(tmp_path)) == 64                       # nothing rerun
+    assert "0 done, 64 already done, 0 failed" in out
+
+
+def test_changed_settings_make_finished_runs_stale(tmp_path, capsys):
+    import os
+    case = _case(tmp_path)
+    stats = gw.grid_stat_case(case)
+    for p in stats:                                          # all clearly older
+        os.utime(p, (1_000_000, 1_000_000))
+    case.grid_stat = dc.GridStatSettings(thresholds_mm=(1.0, 5.0))
+    capsys.readouterr()
+    gw.grid_stat_case(case)
+    assert len(_calls(tmp_path)) == 128
+    assert "64 done, 0 already done" in capsys.readouterr().out
+
+
+def test_failed_runs_do_not_stop_the_others_and_are_retried(tmp_path, capsys):
+    case = _case(tmp_path, mode="failm03")
+    with pytest.raises(SystemExit, match="4 of 64 runs failed"):
+        gw.grid_stat_case(case)
+    out = capsys.readouterr().out
+    assert "FAILED" in out and "member 3 broke" in out
+    import csv
+    with open(case.grid_stat_runs_path) as fh:
+        rows = list(csv.DictReader(fh))
+    failed = [r for r in rows if r["status"] == "failed"]
+    assert len(rows) == 64 and len(failed) == 4          # m03 x 2 inits x 2 windows
+    assert all("_m03_" in r["run"] and r["stat_file"] == "" for r in failed)
+    # fixing the tool and rerunning scores only the failures
+    fake_tools(tmp_path, "ok")
+    capsys.readouterr()
+    gw.grid_stat_case(case)
+    assert "4 done, 60 already done, 0 failed" in capsys.readouterr().out
+
+
+def test_grid_stat_needs_the_mask_and_runs(tmp_path):
+    case = _case(tmp_path)
+    case.mask_path.unlink()
+    with pytest.raises(SystemExit, match="build-mask"):
+        gw.grid_stat_case(case)
+    empty = _case(tmp_path / "e")
+    for p in (tmp_path / "e").rglob("*_wofs_*.nc"):
+        p.unlink()
+    for p in (tmp_path / "e").rglob("*_hfs*_*.nc"):
+        p.unlink()
+    with pytest.raises(SystemExit, match="regrid-wofs"):
+        gw.grid_stat_case(empty)
+    off = make_case(tmp_path / "off", wofs_available=False, valid_start=None,
+                    valid_end=None)
+    with pytest.raises(SystemExit, match="no complete WoFS window"):
+        gw.grid_stat_case(off)
+
+
+def test_the_mask_is_rebuilt_only_when_the_validity_mask_changes(tmp_path):
+    import os
+    case = _case(tmp_path)
+    gw.grid_stat_case(case)
+    mtime = case.grid_stat_mask_path.stat().st_mtime_ns
+    gw.grid_stat_case(case)
+    assert case.grid_stat_mask_path.stat().st_mtime_ns == mtime
+    os.utime(case.mask_path, None)                       # validity mask rebuilt
+    gw.prepare(case, next(iter(gw.work_list(case)[0])).truth)
+    assert case.grid_stat_mask_path.stat().st_mtime_ns > mtime
+
+
+def test_grid_stat_is_a_command_and_the_runs_csv_is_named_by_tag(tmp_path):
+    import run
+    assert run.parse_args(["c.yaml", "grid-stat"])[1] == "grid-stat"
+    case = make_case(tmp_path, res_km=3.0)
+    case.masks = dc.MaskSettings(coast_buffer_km=50.0)
+    assert case.grid_stat_runs_path.name == (
+        "grid_stat_runs_2024_02l_beryl_20240708_d1_3km_coast50km.csv")

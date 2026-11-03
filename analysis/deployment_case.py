@@ -232,6 +232,12 @@ class DeploymentCase:
         return self.grid_stat_dir / (
             f"{self.case_slug}{self.grid_stat_tag}_FULL_mask.nc")
 
+    @property
+    def grid_stat_runs_path(self):
+        """One row per (window, run) the last `grid-stat` considered."""
+        return self.grid_stat_dir / (
+            f"grid_stat_runs_{self.case_slug}{self.grid_stat_tag}.csv")
+
     def grid_stat_window_dir(self, end):
         """One 3 h window's grid_stat output, named by its end."""
         return self.grid_stat_dir / f"{end:%Y%m%d%H}"

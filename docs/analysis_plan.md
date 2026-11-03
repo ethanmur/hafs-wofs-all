@@ -896,15 +896,34 @@ the squared widths; the `FULL` mask is the only mask.
 
 *MET:* `grid_stat`, `gen_vx_mask`.
 
-### E2. Run across all windows, individual runs
-Three pairings per window, all on the same cells:
+### E2. Run across all windows, individual runs (`grid_stat_windows.py`)
 
-1. each WoFS member vs truth
-2. each HAFS cycle vs truth
-3. each WoFS member vs each HAFS cycle at the same valid window, with the
-   same truth, so a head-to-head difference needs no extra definitions
+    python analysis/run.py storms/<case>.yaml grid-stat --res-km 3
+    (a SLURM array job, one task per deployment YAML, runs it in parallel)
 
-*Check:* runtime per window, total output size.
+Every complete window of the scored period that has a truth file is scored with
+every run on disk, each against the truth on the same mask cells:
+
+1. each WoFS member of each init vs truth
+2. each HAFS cycle of each configuration vs truth
+
+WoFS-vs-HAFS comparison is **not** a third set of `grid_stat` calls and neither
+model is treated as truth: it is a join of the per-run results on the valid
+window, in E3/E4. Both are scored against the same truth on identical cells, so
+a head-to-head difference needs no extra definition.
+
+Files: the E1 layout, `data/grid-stat/<dep>_<storm>/<window end>/`, one `.stat`
+and one `.log` per run, plus `grid_stat_runs_<case>[_3km][_coast50km].csv`
+listing every (window, run) with its status (done, cached, failed), seconds and
+file. A rerun skips runs whose `.stat` is newer than the configuration and the
+MET mask, so a killed job resumes and a changed threshold or width reruns
+everything for the case. Failed runs do not stop the rest; the command exits
+non-zero at the end and a rerun retries only those. `GRID_STAT_WORKERS` (else
+`SLURM_CPUS_PER_TASK`) sets how many calls run at once. A window with no truth
+file is skipped and named.
+
+*Check:* runtime per window (printed per run and in total), total output size
+(printed), and that the per-window run counts match the work list in the CSV.
 
 ### E3. Parse into the long CSV schema
 Columns: `storm, deployment, model, run_id, member, init, valid_time,

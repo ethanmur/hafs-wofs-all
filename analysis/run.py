@@ -60,6 +60,14 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 truth on the validity mask, into <grid_stat_dir>; prints the
                 row counts and scores to check by hand. Needs build-mask,
                 regrid-wofs, regrid-hafs, window-obs and `module load met`
+  grid-stat     E2: score every window of the scored period with every run
+                (all members of every WoFS init, every HAFS cycle) against the
+                truth on the validity mask, into <grid_stat_dir>/<window end>/.
+                Resumable: a run with a current .stat file is skipped; runs
+                GRID_STAT_WORKERS (else SLURM_CPUS_PER_TASK) calls at once and
+                lists every run in grid_stat_runs_<case>.csv. WoFS-vs-HAFS
+                comparison is a later join of these results. Needs build-mask,
+                regrid-wofs, regrid-hafs, window-obs and `module load met`
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself
@@ -100,7 +108,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
             "regrid-hafs", "window-obs", "plot-eyeball",
-            "plot-hafs-check", "plot-mask-check", "grid-stat-test",
+            "plot-hafs-check", "plot-mask-check", "grid-stat-test", "grid-stat",
             "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
 
 
@@ -184,6 +192,9 @@ def dispatch(case, command):
     if command == "grid-stat-test":
         from grid_stat_windows import grid_stat_test_case
         return grid_stat_test_case(case)
+    if command == "grid-stat":
+        from grid_stat_windows import grid_stat_case
+        return grid_stat_case(case)
     if command == "download-obs":
         import obs_cases
         return obs_cases.download_obs(case)

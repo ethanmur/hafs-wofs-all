@@ -1,6 +1,7 @@
 """grid_stat configuration and a one-window test run (plan step E1).
 
     python analysis/run.py storms/<case>.yaml grid-stat-test --res-km 3
+    python analysis/run.py storms/<case>.yaml grid-stat --res-km 3      (E2)
 
 Writes the grid_stat configuration for the case, builds the validity mask as a
 MET NetCDF named FULL (gen_vx_mask), and scores one window: one WoFS member
@@ -25,6 +26,15 @@ latter covering 9 / 21 / 33 / 57 / 129 km). The fields
 are already on one grid, so there is no interpolation, and the only mask is the
 validity mask.
 
+`grid-stat` (E2) scores every window of the scored period with every run: all
+members of every WoFS init and every HAFS cycle, each against the truth on the
+same mask cells. It is resumable (a run with a current .stat file is skipped),
+runs `GRID_STAT_WORKERS` (else SLURM_CPUS_PER_TASK, else 1) calls at a time, and
+records every run, done, cached or failed, in grid_stat_runs_<case>.csv. A
+WoFS-vs-HAFS comparison is a join of these per-run results on the window, with
+no further grid_stat calls: both are scored against the same truth on the same
+cells, so neither is treated as truth.
+
 Files, under <grid_stat_dir> (data/grid-stat/<dep>_<storm>/):
     GridStat_<case>[_3km][_coast50km].conf
     <case>[_3km][_coast50km]_FULL_mask.nc
@@ -32,10 +42,13 @@ Files, under <grid_stat_dir> (data/grid-stat/<dep>_<storm>/):
 where <run> is wofs_m00_i<init> or <hfsa|hfsb>_c<cycle>.
 """
 
+import csv
 import os
 import subprocess
 import sys
 import time
+from collections import Counter, namedtuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -137,10 +150,32 @@ output_prefix = "${{OUT_PREFIX}}";
 
 
 def write_config(case):
+    """Write the configuration, but only when its text changed: its file time
+    is what tells a finished run from one made under older settings."""
     path = case.grid_stat_conf_path
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(config_text(case))
+    text = config_text(case)
+    if not path.exists() or path.read_text() != text:
+        path.write_text(text)
     return path
+
+
+class GridStatError(RuntimeError):
+    """A grid_stat or gen_vx_mask call that did not produce its output."""
+
+
+def prepare(case, grid_file):
+    """The configuration and the MET mask for this case, written only when
+    missing or out of date (the mask when older than the validity mask it
+    comes from). `grid_file` is any truth window: the mask takes its grid."""
+    conf = write_config(case)
+    mask = case.grid_stat_mask_path
+    if (not mask.exists()
+            or mask.stat().st_mtime < case.mask_path.stat().st_mtime):
+        ok, why = mask_check.make_met_mask(case, grid_file, mask, name="FULL")
+        if not ok:
+            raise GridStatError(f"cannot build the MET mask: {why}")
+    return conf, mask
 
 
 # =============================================================================
@@ -199,10 +234,27 @@ def runs_for_selection(case, pick):
 # Running grid_stat and reading the result
 # =============================================================================
 
+def run_prefix(case, tag):
+    return f"{tag}{case.grid_stat_tag}"
+
+
+def existing_stat(case, tag, out_dir):
+    """The finished .stat of a run, or None. One written before the
+    configuration or the MET mask last changed is out of date, not finished."""
+    found = sorted(Path(out_dir).glob(
+        f"grid_stat_{run_prefix(case, tag)}_*.stat"))
+    if not found or found[-1].stat().st_size == 0:
+        return None
+    newest = max(p.stat().st_mtime for p in (case.grid_stat_conf_path,
+                                             case.grid_stat_mask_path)
+                 if p.exists())
+    return found[-1] if found[-1].stat().st_mtime >= newest else None
+
+
 def run_grid_stat(case, fcst, fcst_name, obs, tag, out_dir):
     """One grid_stat call; returns the .stat path."""
     tool = met_regrid.met_tool("grid_stat", case.regrid.met_bin_dir)
-    prefix = f"{tag}{case.grid_stat_tag}"
+    prefix = run_prefix(case, tag)
     out_dir.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, MODEL=tag, FCST_NAME=fcst_name,
                MASK_FILE=str(case.grid_stat_mask_path), OUT_PREFIX=prefix)
@@ -214,7 +266,8 @@ def run_grid_stat(case, fcst, fcst_name, obs, tag, out_dir):
     found = sorted(out_dir.glob(f"grid_stat_{prefix}_*.stat"))
     if proc.returncode != 0 or not found:
         tail = "\n".join((proc.stderr or proc.stdout).strip().splitlines()[-6:])
-        raise SystemExit(f"grid_stat failed for {prefix} (log: {log}):\n{tail}")
+        raise GridStatError(f"grid_stat failed for {prefix} (log: {log}):\n"
+                            f"{tail}")
     return found[-1]
 
 
@@ -329,20 +382,172 @@ def grid_stat_test_case(case):
           f"{neighbourhood_cells(s.widths_km, case.res_km)} cells "
           f"({effective_km(s.widths_km, case.res_km)} km), "
           f"wet cells >= {s.wet_thresh_mm:g} mm")
-    conf = write_config(case)
-    ok, why = mask_check.make_met_mask(case, pick["truth"],
-                                       case.grid_stat_mask_path, name="FULL")
-    if not ok:
-        raise SystemExit(f"grid-stat-test: cannot build the MET mask: {why}")
+    try:
+        conf, _ = prepare(case, pick["truth"])
+    except GridStatError as err:
+        raise SystemExit(f"grid-stat-test: {err}") from None
     out_dir = case.grid_stat_window_dir(window.end)
     print(f"Output : {out_dir}\nWrote  : {conf}\n         "
           f"{case.grid_stat_mask_path}", flush=True)
 
     written, started = [], time.monotonic()
     for tag, path, name in runs:
-        stat = run_grid_stat(case, path, name, pick["truth"], tag, out_dir)
+        try:
+            stat = run_grid_stat(case, path, name, pick["truth"], tag, out_dir)
+        except GridStatError as err:
+            raise SystemExit(str(err)) from None
         written.append(stat)
         print_digest(case, read_stat(stat),
                      f"{tag}  ->  {stat.name}  (+{time.monotonic() - started:.0f}s)")
     print(f"\nScored {len(written)} runs for one window under {out_dir}")
     return written
+
+
+# =============================================================================
+# E2: every window, every run
+# =============================================================================
+
+Job = namedtuple("Job", "window tag fcst name truth out_dir")
+
+
+def members_in(path):
+    """The member variables (rain_mm_m00, ...) of a WoFS 3 h file."""
+    import netCDF4
+    with netCDF4.Dataset(path) as nc:
+        return sorted(n for n in nc.variables if n.startswith(f"{ww.VAR}_m"))
+
+
+def work_list(case):
+    """([Job], [windows skipped for want of truth]). Every clock window of the
+    scored period that has a truth file gets every run on disk: each member of
+    each WoFS init and each HAFS cycle of each configuration. A window with no
+    truth is skipped; one with truth and no runs just has no jobs."""
+    jobs, skipped = [], []
+    for w in aw.clock_windows(case.valid_start, case.valid_end):
+        truth = case.obs_window_path(case.truth_source, w.end)
+        if not truth.exists():
+            skipped.append(w)
+            continue
+        out_dir = case.grid_stat_window_dir(w.end)
+        for init, path in runs_for(case.wofs_regrid_3h_dir, w.end, "wofs",
+                                   case.res_label):
+            for name in members_in(path):
+                member = int(name.rsplit("_m", 1)[1])
+                jobs.append(Job(w, f"wofs_m{member:02d}_i{init:%Y%m%d%H%M}",
+                                path, name, truth, out_dir))
+        for config in case.hafs_models:
+            for init, path in runs_for(case.hafs_regrid_dir_for(config),
+                                       w.end, config.lower(), case.res_label):
+                jobs.append(Job(w, f"{config.lower()}_c{init:%Y%m%d%H}",
+                                path, OBS_NAME, truth, out_dir))
+    return jobs, skipped
+
+
+def worker_count():
+    """grid_stat calls to run at once: GRID_STAT_WORKERS, else the cores SLURM
+    gave the task, else 1."""
+    for key in ("GRID_STAT_WORKERS", "SLURM_CPUS_PER_TASK"):
+        try:
+            n = int(os.environ[key])
+        except (KeyError, ValueError):
+            continue
+        if n >= 1:
+            return n
+    return 1
+
+
+def run_job(case, job):
+    """{"status": cached | done | failed, "stat", "seconds", "error"}."""
+    cached = existing_stat(case, job.tag, job.out_dir)
+    if cached:
+        return {"status": "cached", "stat": cached, "seconds": 0.0,
+                "error": ""}
+    started = time.monotonic()
+    try:
+        stat = run_grid_stat(case, job.fcst, job.name, job.truth, job.tag,
+                             job.out_dir)
+    except GridStatError as err:
+        return {"status": "failed", "stat": None, "error": str(err),
+                "seconds": time.monotonic() - started}
+    return {"status": "done", "stat": stat, "error": "",
+            "seconds": time.monotonic() - started}
+
+
+def write_runs_csv(case, rows):
+    path = case.grid_stat_runs_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="") as fh:
+        out = csv.writer(fh)
+        out.writerow(["window_end", "run", "status", "seconds", "stat_file"])
+        for end, tag, r in rows:
+            out.writerow([f"{end:%Y%m%d%H}", tag, r["status"],
+                          f"{r['seconds']:.1f}",
+                          r["stat"].name if r["stat"] else ""])
+    return path
+
+
+def grid_stat_case(case):
+    """Driver for `grid-stat`: score every window with every run."""
+    print(f"Case   : {case.storm_name} {case.deployment}  ({case.case_slug})")
+    if not case.wofs_available:
+        raise SystemExit(f"grid-stat: {case.case_slug} has no complete WoFS "
+                         "window; nothing to score.")
+    if not case.mask_path.exists():
+        raise SystemExit(f"grid-stat: {case.mask_path} is missing; run "
+                         "build-mask first (same --res-km and --coast-km).")
+    jobs, skipped = work_list(case)
+    if not jobs:
+        raise SystemExit("grid-stat: no runs found with truth; run "
+                         "regrid-wofs, regrid-hafs and window-obs first.")
+    try:
+        conf, _ = prepare(case, jobs[0].truth)
+    except GridStatError as err:
+        raise SystemExit(f"grid-stat: {err}") from None
+    workers = worker_count()
+    families = Counter(j.tag.split("_")[0] for j in jobs)
+    windows = sorted({j.window.end for j in jobs})
+    print(f"Truth  : {LABELS[case.truth_source]}  |  mask {case.mask_path.name}")
+    print(f"Work   : {len(jobs):,} runs over {len(windows)} windows ("
+          + ", ".join(f"{k} {v:,}" for k, v in sorted(families.items()))
+          + f"); {workers} at a time")
+    if skipped:
+        print(f"Skipped: {len(skipped)} windows with no "
+              f"{LABELS[case.truth_source]} file (run window-obs): "
+              + ", ".join(f"{w.end:%m-%d %HZ}" for w in skipped))
+    print(f"Output : {case.grid_stat_dir}\nConfig : {conf}\n", flush=True)
+
+    started = time.monotonic()
+    results = {}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(run_job, case, j): j for j in jobs}
+        for n, future in enumerate(as_completed(futures), 1):
+            job, r = futures[future], future.result()
+            results[(job.window.end, job.tag)] = r
+            if r["status"] != "cached" or n % 100 == 0:
+                print(f"  [{n:>5}/{len(jobs)}] {job.window.end:%m-%d %HZ} "
+                      f"{job.tag:<28} {r['status']:<6} {r['seconds']:5.1f}s",
+                      flush=True)
+    rows = [(j.window.end, j.tag, results[(j.window.end, j.tag)])
+            for j in sorted(jobs, key=lambda j: (j.window.end, j.tag))]
+    csv_path = write_runs_csv(case, rows)
+
+    status = Counter(r["status"] for _, _, r in rows)
+    print(f"\n{'window end':>14} {'runs':>6} {'done':>6} {'cached':>7} "
+          f"{'failed':>7}")
+    for end in windows:
+        per = Counter(r["status"] for e, _, r in rows if e == end)
+        print(f"{end:%Y-%m-%d %HZ} {sum(per.values()):>6} {per['done']:>6} "
+              f"{per['cached']:>7} {per['failed']:>7}")
+    size = sum(r["stat"].stat().st_size for _, _, r in rows if r["stat"])
+    print(f"\n{status['done']} done, {status['cached']} already done, "
+          f"{status['failed']} failed; {size / 1e6:.1f} MB of .stat files; "
+          f"{(time.monotonic() - started) / 60:.1f} min")
+    print(f"Runs   : {csv_path}")
+    if status["failed"]:
+        failed = [(e, t, r) for e, t, r in rows if r["status"] == "failed"]
+        for end, tag, r in failed[:3]:
+            print(f"\nFAILED {end:%Y-%m-%d %HZ} {tag}:\n{r['error']}")
+        raise SystemExit(f"grid-stat: {status['failed']} of {len(rows)} runs "
+                         f"failed; rerun to retry them (finished runs are "
+                         f"kept). Details in {csv_path}")
+    return [r["stat"] for _, _, r in rows]
