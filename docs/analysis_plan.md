@@ -104,8 +104,9 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
 - **HAFS-A and HAFS-B are separate models**, never pooled, because their
   physics differ. A later HAFS "ensemble" is built from several cycles of one
   configuration. Mixing configurations is an experiment, not a default.
-- **Truth product: MRMS by default, switchable to Stage IV** by one config key
-  (`truth_source`) with no other change. The `noaa-mrms-pds` archive of
+- **Truth product: MRMS at 3 km, Stage IV as the backup,** switchable by one
+  config key (`truth_source`) with no other change; statistics run at the 3 km
+  grid only. The `noaa-mrms-pds` archive of
   `MultiSensor_QPE_01H_Pass2` begins 2020-10-14, so it covers every 2023–2024
   case; MRMS matters here because the small sample makes a second truth product
   a worthwhile sensitivity check. Only the truth product is regridded unless
@@ -120,8 +121,10 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
   complete 3 h WoFS window as downloaded. It stays in the inventory and
   manifest as unavailable; whether more files can be obtained is outside the
   code.
-- Stage IV coverage over the mountain West (Hilary's three California and
-  Nevada domains) is verified by hand; `truth_source: mrms` (now the default) avoids the question.
+- Truth is MRMS regridded to the 3 km deployment grid; Stage IV is kept as the
+  backup product and sensitivity check. Hand inspection shows Stage IV looking
+  worse than MRMS over Hilary's California and Nevada domains, which settles
+  the choice there.
 - Whether `stats-regrid`'s MRMS-vs-Stage IV comparison earns its place once
   the Stage IV sensitivity check is run; H1 decides. (AORC was removed in B0.)
 - Which WoFS members to verify and how to label them (Phase D1).
@@ -808,9 +811,31 @@ deployment. The proximity columns join in G3. `regrid-wofs` and the HAFS regrid
 Check that `mask_radius_km`, `swath` and the `SWATH`/`WOFS` mask names are gone from every
 config, schema and plotting default. Search the repo for each.
 
-*Check:* grep finds none; tests pass.
+*Done:* the only live hits were stale README sections for the deleted per-run
+commands (`parent`, `ets`, `cycles`, `compare`), now replaced by the current
+command list, and one docstring in `masks.py`. What remains is deliberate: guard
+tests that the old names stay gone (`test_masks.py`, `test_deployment_case.py`),
+the ATCF radius-of-maximum-wind parser in `best_track.py` and the Earth radius
+in the grid spec. The old per-cycle swath is also named in this plan's history
+(scope notes, C0).
+
+*Check:* grep finds none outside those; tests pass.
+
+### E0b. Mask check by spatial plot
+Before any statistics, look at the mask where `grid_stat` will use it. For one
+case per storm, plot the `obs_valid` field as MET reads it (the mask NetCDF
+through `regrid_data_plane`, onto the verification grid) beside a 3 h MRMS
+window, with the cells the mask removes outlined. Confirm: the mask covers the
+deployment domain's land and the 150 km offshore band; detached islands are cut;
+no cell with MRMS data is masked off, and no masked-in cell is missing truth
+outside real radar gaps. Hilary's inland West domains and Milton's Florida
+coast are the cases to read first.
+
+*Check:* by eye, per storm; any disagreement is fixed in `masks.py` before E1.
 
 ### E1. `grid_stat` configuration
+- resolution: run at one resolution, the 3 km grid. Every output name carries
+  `_3km` (the `--res-km` rule), so a later 6 km run writes beside it, never over it
 - thresholds: 0.5 / 1 / 2.5 / 5 / 10 / 25 / 50 mm per 3 h
 - mask: `FULL` = whole deployment grid ∩ `obs_valid` (one region now)
 - neighborhood widths defined in km: 6 / 18 / 30 / 54 / 126 km, which is 1 / 3 / 5 / 9 / 21 cells at 6 km (2 / 6 / 10 / 18 / 42 at 3 km), so the scales mean the same distances at any resolution

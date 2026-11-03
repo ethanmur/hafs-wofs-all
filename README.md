@@ -1,17 +1,12 @@
 # HAFS & WoFS rainfall verification
 
-Case-driven tools for evaluating tropical-cyclone quantitative precipitation
-forecasts. The current implementation covers HAFS-A and HAFS-B; WoFS and
-multi-storm aggregation are planned extensions.
-
-The framework supports three analysis levels:
-
-1. One model initialization: QPF maps, categorical skill, and continuous
-   errors.
-2. Every eligible initialization of one model: a fixed-window comparison that
-   isolates lead-time differences.
-3. HAFS-A versus HAFS-B for one initialization: a head-to-head comparison over
-   a shared NHC best-track footprint.
+Case-driven tools for verifying 3 h tropical-cyclone rainfall from HAFS (HFSA,
+HFSB cycles) and the WoFS 18-member ensemble against MRMS (Stage IV is the
+sensitivity product). Each WoFS deployment is one case: every product is
+regridded to that deployment's 900 x 900 km domain on a common grid (3 km is
+the working resolution; 6 km is the default and `--res-km N` changes it), and
+scoring uses absolute-clock 3 h windows. `docs/analysis_plan.md` is the
+authoritative design, phase by phase.
 
 ## Setup
 
@@ -27,267 +22,31 @@ The main dependencies are NumPy, SciPy, PyYAML, boto3, cfgrib, ecCodes,
 xarray, Matplotlib, Cartopy, Seaborn, and Pillow. `environment.yml` is preferred because it
 installs the required native GRIB and mapping libraries.
 
-MRMS observations are downloaded anonymously from NOAA's public S3 bucket.
-Stage IV files are downloaded from `water.noaa.gov`. Downloads are cached in
-`/tmp/mrms_cache` and `/tmp/stage4_cache` unless a YAML file overrides those
-locations.
+## Run one deployment
 
-## Expected HAFS layout
-
-A model root should contain one `YYYYMMDDHH` directory per initialization:
-
-```text
-/work2/.../helene/HFSA/
-  2024092400/
-    09l.2024092400.hfsa.parent.trak.atcfunix
-    09l.2024092400.hfsa.parent.atm.f000.grb2
-    09l.2024092400.hfsa.parent.atm.f003.grb2
-    ...
-    09l.2024092400.hfsa.storm.atm.f000.grb2
-    09l.2024092400.hfsa.storm.atm.f003.grb2
-    ...
-  2024092412/
-  ...
-```
-
-Large model data and generated products are intentionally excluded from Git.
-
-## Run one initialization
-
-A per-initialization YAML points to the model root or initialization directory:
-
-```yaml
-run_dir: /work2/.../helene/HFSA
-storm_name: Hurricane Helene
-init: 2024092400
-domain: [15.0, 42.0, -100.0, -60.0]
-mask_radius_km: 500
-out_dir: analysis/output/helene_hfsa
-```
-
-Run all products or select one:
+One YAML per deployment lives in `storms/` (regenerate with
+`analysis/make_case_yamls.py`; do not edit scoring windows by hand). Run the
+steps in order; global flags `--res-km N` and `--sources stage4 mrms` apply to
+any of them.
 
 ```bash
-python analysis/run.py storms/helene_hfsa.yaml all
-python analysis/run.py storms/helene_hfsa.yaml parent
-python analysis/run.py storms/helene_hfsa.yaml ets
-python analysis/run.py storms/helene_hfsa.yaml rmse
+python analysis/run.py storms/<case>.yaml build-grid       # verification grid
+python analysis/run.py storms/<case>.yaml build-mask       # observation-validity mask
+python analysis/run.py storms/<case>.yaml build-manifest   # windows and what is on disk
+python analysis/run.py storms/<case>.yaml regrid-wofs      # WoFS 1 h / 3 h on the grid
+python analysis/run.py storms/<case>.yaml regrid-hafs      # HAFS 3 h buckets on the grid
+python analysis/run.py storms/<case>.yaml download-obs     # login node: fetch MRMS
+python analysis/run.py storms/<case>.yaml regrid-obs       # hourly obs on the grid
+python analysis/run.py storms/<case>.yaml window-obs       # obs 3 h windows
+python analysis/run.py storms/<case>.yaml plot-eyeball     # WoFS | HAFS | truth panels
+python analysis/run.py storms/<case>.yaml plot-hafs-check  # native vs regridded HAFS
 ```
 
-`all` builds the expensive verification fields once and shares them between
-the ETS and continuous-error products.
-
-Outputs are initialization-tagged and written below the configured `out_dir`:
-
-```text
-parent_qpf_<case>_<init>.png    nest + parent + MRMS + Stage IV QPF
-ets_full_<case>_<init>.png     ETS versus rainfall threshold
-ets_full_<case>_<init>.csv     contingency counts and categorical scores
-rmse_scatter_<case>_<init>.png forecast-versus-observed scatter panels
-rmse_<case>_<init>.csv         RMSE, MAE, bias, and correlation
-```
-
-## Compare every initialization of one model
-
-This is the scalable workflow for roughly ten pre-landfall runs. A single YAML
-describes a storm, model, and absolute verification window; initialization
-directories are discovered automatically.
-
-```yaml
-run_root: /work2/.../helene/HFSA
-valid_start: 2024092600
-valid_end: 2024092800
-landfall_time: 202409270310
-storm_name: Hurricane Helene
-domain: [15.0, 42.0, -100.0, -60.0]
-mask_radius_km: 500
-out_dir: analysis/output/helene_hfsa_cycles
-```
-
-Run either model with its corresponding config:
-
-```bash
-python analysis/run.py storms/helene_hfsa_cycles.yaml cycles
-python analysis/run.py storms/helene_hfsb_cycles.yaml cycles
-```
-
-Cycles initialized before `valid_start` accumulate from `valid_start`; later
-cycles accumulate from their initialization. Every cycle must extend through
-the common `valid_end` and is verified against MRMS/Stage IV accumulated over
-its matching interval. The output CSV records each cycle's effective start and
-end. Use an optional `inits:` list only when automatic discovery should be
-restricted. `landfall_time` enables a common "hours before landfall" axis; it
-accepts `YYYYMMDDHH` or `YYYYMMDDHHMM` UTC.
-
-Scores use one shared spatial swath: the union of all surviving forecast-track
-positions within their effective windows. Because later initializations use
-shorter accumulation periods, interpret cycle-to-cycle changes together with
-the recorded valid window.
-
-Cycle outputs are:
-
-```text
-cycles_<case>_<start>_<end>.csv
-cycles_fss_<case>_<start>_<end>.csv
-cycles_metrics_<case>_<start>_<end>.png
-cycles_ets_heatmap_<case>_<start>_<end>.png
-cycles_ets_bars_<case>_<start>_<end>.png
-cycles_fss_heatmap_<case>_<start>_<end>.png
-cycles_qpf_<case>_<start>_<end>.gif
-cycles_difference_<case>_<start>_<end>.gif
-cycles_observed_<case>_<start>_<end>.gif
-```
-
-The multi-cycle products use only the fixed parent domain. ETS is shown as a
-Seaborn heatmap of rainfall threshold by initialization; FSS uses one Seaborn
-heatmap per rainfall threshold, with neighborhood scale by initialization.
-The model-level ETS bar chart follows the paper-style 2–24 inch threshold axis
-and pools contingency counts across cycles before calculating ETS. The suite
-also includes separate parent-forecast, parent-minus-MRMS, and observed-MRMS
-animations. The
-observed animation remains visually static while its accumulation window is
-unchanged. Set `make_animation: false` to skip all three GIFs.
-Optional `ets_bar_thresholds_in`,
-`fss_thresholds_in` and `fss_scales_cells` lists control the bar-chart and FSS
-thresholds/scales.
-
-To compare the cycle tables from HAFS-A, HAFS-B, and HAFS-M, run:
-
-```bash
-python3 analysis/run.py storms/helene_cycles_compare.yaml cycles-compare
-```
-
-This creates grouped ETS bars and a scale-dependent FSS comparison in
-`analysis/output/helene_cycles_compare`. A configured model without cycle
-CSVs—currently HAFS-M—is retained in the legend as “awaiting data.” After its
-files arrive, update `storms/helene_hfsm_cycles.yaml`, run that model's
-`cycles` command, and rerun `cycles-compare`.
-
-## Compare HAFS-A and HAFS-B
-
-The two case YAMLs must describe the same storm and initialization. Download
-the storm's NHC ATCF b-deck and reference it from a comparison YAML:
-
-```yaml
-label: Hurricane Helene
-cases:
-  - storms/helene_hfsa.yaml
-  - storms/helene_hfsb.yaml
-best_track: /work2/.../bal092024.dat
-out_dir: analysis/output/helene_compare
-```
-
-```bash
-python analysis/run.py storms/helene_compare.yaml compare
-```
-
-Both configurations are evaluated on the same best-track swath and common
-finite-data coverage. Products include categorical curves, FSS by
-neighborhood scale, a performance diagram, storm-total maps and exceedance
-areas, and RMW-normalized storm-relative composites. CSVs contain the complete
-categorical and FSS matrices.
-
-Existing comparison CSVs can be replotted without reopening GRIB files:
-
-```bash
-python analysis/run.py storms/helene_compare.yaml replot
-```
-
-## Compare observational datasets
-
-No HAFS forecast involved: validates MRMS, Stage IV, and AORC against each
-other before any of them is trusted as verification truth elsewhere in this
-repo. Every product is put on one common grid first (`regrid-obs`, via MET),
-and the comparisons run on that regridded output over the full `domain`; the
-best track is drawn on every map.
-
-```yaml
-storm_name: Hurricane Helene
-best_track: /work2/.../bal092024.dat
-valid_start: 2024092400
-valid_end:   2024092906
-domain: [15.0, 42.0, -100.0, -60.0]
-
-out_dir:          analysis/output/helene_obs_compare
-mrms_cache_dir:   /work2/.../mrms_cache
-stage4_cache_dir: /work2/.../stage4_cache_hourly
-aorc_cache_dir:   /work2/.../noaa_aorc
-
-skip_mrms: false
-skip_stage4: false
-skip_aorc: false
-```
-
-Downloading and comparing are two separate commands, so a no-internet compute
-node can run the comparison against data a login node already fetched:
-
-```bash
-# On a login node (has internet): fetch and cache raw MRMS/AORC only -- no
-# regridding, no plotting, sequential requests only. Stage IV hourly data
-# is NOT fetched here -- place ST4.<YYYYMMDD> files under stage4_cache_dir
-# yourself (see analysis/stage4_hourly.py) before running regrid-obs.
-python analysis/run.py storms/helene_obs_compare.yaml download-obs
-
-# On a compute node: regrid every cached obs hour onto the HAFS parent grid
-# with MET regrid_data_plane (BUDGET by default), cached as NetCDF under
-# regrid.cache_dir. Needs `module load met/12.2.0`. Hours already regridded
-# are skipped; the per-hour conservation check is always rewritten.
-python analysis/run.py storms/helene_obs_compare.yaml regrid-obs
-
-# Hourly maps of the regrid-obs output, under regrid_plots.out_dir:
-#   compare-regrid/<source>_{full,zoom}_<YYYYMMDDHH>.png  native vs regridded
-#   compare-products/products_full_<...>.png  MRMS | Stage IV | AORC regridded
-#   compare-anomaly/anomaly_full_<...>.png    AORC | AORC-MRMS | AORC-Stage IV
-# The zoom box is regrid_plots.zoom_domain. Headers quote the area-mean
-# change from the regrid-obs conservation CSV when it exists.
-python analysis/run.py storms/helene_obs_compare.yaml plot-regrid
-
-# Distributions and cell-by-cell 1:1 comparisons of the regridded products,
-# per hour and over the whole window, land-only (AORC coverage) and
-# including ocean, plus stats_sources_/stats_pairs_ CSVs. Each pair uses the
-# cells where both products report, so MRMS-vs-Stage IV keeps the ocean.
-python analysis/run.py storms/helene_obs_compare.yaml stats-regrid
-```
-
-`regrid-obs` hands MET exactly one unambiguous field per file: the cached
-MRMS GRIB2 as-is, the single finest-grid 1h message cut out of the
-multi-record `ST4.<day>` file, and AORC written as an equivalent 1-hour APCP
-GRIB2 message (its 0.008333° grid is exact in GRIB2's microdegree units). Its
-`regrid_budget_<case>.csv` compares, per source per hour, MET's area-weighted
-mean over the common valid area against an exact box average of the native
-field; rows beyond `tolerance_pct` (and 0.01 mm) are flagged `CHECK`. The
-target grid is whatever `regrid.grid_template` points at — note HAFS parent
-domains can differ between cycles, so pick a template covering the whole case
-window (the run warns if part of `domain` falls outside it).
-
-All three sources are individually skippable
-(`skip_mrms` / `skip_stage4` / `skip_aorc` — a skipped source is left out of
-every panel and pairing rather than erroring). Stage IV hourly values come
-from NCEP's own `ST4.<YYYYMMDD>` archive files, which bundle a file's 1h
-message alongside its 6h/24h ones for every hour of the day; `stage4_hourly.py`
-reads only the 1h messages, keyed by each message's GRIB-decoded
-accumulation-end time (the same hour-end convention MRMS/AORC already use).
-
-AORC (`s3://noaa-nws-aorc-v1-1-1km`, 1-km hourly, no AWS account needed) is
-one Zarr store per year rather than per-timestep files — opened lazily via
-`s3fs`/`xarray.open_zarr`, sliced to the requested hour, and cached locally
-as a small per-hour NetCDF so repeat runs never re-touch S3.
-
-## Verification details
-
-- The fixed HAFS parent grid uses its cumulative `0 -> forecast hour` APCP
-  record.
-- The moving nest cannot use its storm-relative cumulative APCP as a
-  geographic storm total. The code regrids and sums short, geographically
-  valid incremental buckets instead.
-- MRMS uses hourly gauge-corrected multisensor QPE accumulated over the exact
-  requested window.
-- Stage IV is CONUS-only and consists of 12Z-to-12Z daily products. Summing
-  touched days approximates windows that do not align to those boundaries;
-  figures and CSV workflows retain that caveat.
-- Categorical outputs include ETS, CSI, frequency bias, POD, FAR, and HSS.
-- Continuous outputs include RMSE, MAE, mean bias, and Pearson correlation.
-- FSS evaluates spatial displacement tolerance across neighborhood sizes.
+`plot-regrid` and `stats-regrid` are the obs-product checks. The regrid steps
+need `module load met` (and eccodes for `regrid-hafs`). Outputs go to flat
+`data/<kind>/` and `figures/<kind>/` folders with the case in the file name; a
+non-default resolution adds `_<N>km`. Large model data and generated products
+are excluded from Git.
 
 ## Tests
 
@@ -295,29 +54,32 @@ as a small per-hour NetCDF so repeat runs never re-touch S3.
 python -m pytest analysis/tests -q
 ```
 
-Tests use synthetic fields and small track fixtures; they do not require the
-HPC model archive or observation downloads.
+Tests use synthetic fields and stand-ins for MET, so they need no HPC archive or
+downloads.
 
 ## Repository layout
 
 ```text
 analysis/
-  run.py             command dispatcher
-  hafs_case.py       YAML loading, track parsing, and case models
-  hafs_common.py     GRIB loading, nest accumulation, and MRMS access
-  parent_qpf.py      QPF maps and Stage IV access
-  ets_full.py        per-run categorical verification
-  rmse_scatter.py    per-run continuous verification
-  cycles.py          fixed-window, multi-initialization analysis
-  compare.py         HAFS-A versus HAFS-B analysis
-  obs_cases.py       obs-case config, obs download/cache, and MET regridding
-  obs_regrid_plots.py native-vs-regridded, product, and anomaly maps
-  obs_regrid_stats.py regridded distributions and 1:1 comparisons
-  aorc_common.py     NOAA AORC (Zarr, S3) access and per-hour caching
-  stage4_hourly.py   NCEP ST4.<day> hourly Stage IV access (cache-only)
-  met_regrid.py      MET regrid_data_plane wrapper and conservation check
-  skill_metrics.py   shared continuous and neighborhood metrics
-  best_track.py      NHC b-deck parsing
-  tests/             unit and plotting tests
-storms/              active case and cycle configurations
+  run.py              command dispatcher
+  deployment_case.py  per-deployment YAML loading and every output path
+  make_case_yamls.py  writes the case YAMLs from the inventories
+  wofs_inventory.py   WoFS archive inventory (A1)
+  hafs_inventory.py   HAFS cycle inventory (A1b)
+  accum_windows.py    absolute-clock 3 h windows
+  verification_grid.py grid builder       masks.py   observation-validity mask
+  window_manifest.py  window manifest (D6)
+  wofs_windows.py     WoFS 1 h / 3 h on the grid (D3)
+  hafs_windows.py     HAFS 3 h on the grid (D4)
+  obs_cases.py        obs download, cache and MET regrid
+  obs_windows.py      obs 3 h windows (D5)
+  eyeball_plots.py    eyeball and HAFS check panels (D5b)
+  obs_regrid_plots.py / obs_regrid_stats.py / plot_common.py / plot_units.py
+  met_regrid.py       MET regrid_data_plane wrapper and budget check
+  stage4_hourly.py    Stage IV hourly access
+  best_track.py       NHC b-deck parsing
+  fetch_bdecks.py     b-deck downloader        grid_spacing.py  GRIB spacing check
+  tests/              unit and plotting tests
+storms/               one YAML per deployment
+docs/analysis_plan.md the plan
 ```

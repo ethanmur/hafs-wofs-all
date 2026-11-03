@@ -7,8 +7,7 @@ from some statistics and not others. This module draws the region where the
 truth product can be trusted -- US land, plus a fixed distance beyond it in
 every direction -- and writes it as a MET-readable NetCDF on the deployment
 grid. The verification region is the whole WoFS domain intersected with this
-mask; there is no track swath and no WoFS-box mask, since the grid *is* the
-WoFS domain.
+mask: the grid *is* the WoFS domain, so no other region is needed.
 
 The construction:
 
