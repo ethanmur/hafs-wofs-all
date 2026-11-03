@@ -869,7 +869,7 @@ inland West domains and Milton's Florida coast first.
 - mask: `FULL` = whole deployment grid ∩ `obs_valid` (one region now), built as a
   MET NetCDF by `gen_vx_mask` from the validity mask, and the only region
   (`mask.grid = []`)
-- neighborhood widths defined in km: 6 / 18 / 30 / 54 / 126 km, which is 1 / 3 / 5 / 9 / 21 cells at 6 km (2 / 6 / 10 / 18 / 42 at 3 km), so the scales mean the same distances at any resolution. The even 3 km widths are untried: if `grid_stat` rejects them, fall back to odd widths. `cov_thresh` >= 0.5
+- neighborhood widths defined in km: 6 / 18 / 30 / 54 / 126 km, which is 1 / 3 / 5 / 9 / 21 cells at 6 km, so the scales mean the same distances at any resolution. `grid_stat` accepts only odd widths ("neighborhood widths must be odd"), so at 3 km, where the same distances are 2 / 6 / 10 / 18 / 42 cells, each even count goes up to the next odd one: 3 / 7 / 11 / 19 / 43 cells, covering 9 / 21 / 33 / 57 / 129 km. Report those effective distances, not the nominal ones, at 3 km. `cov_thresh` >= 0.5
 - line types: `CTC CTS CNT SL1L2 NBRCTC NBRCNT`. The continuous types (`CNT`,
   `SL1L2`) are written twice per run, over all cells (`cnt_thresh` NA) and over wet
   cells only (either field >= 0.5 mm, `cnt_logic = UNION`), since dry cells

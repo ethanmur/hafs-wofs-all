@@ -18,8 +18,10 @@ What the configuration asks for (settings in `GridStatSettings`):
                      at or above `wet_thresh_mm`, union)
   NBRCTC NBRCNT      neighborhood counts and FSS at each threshold and width
 
-The neighborhood widths are distances; they become cells for the grid in use
-(6 / 18 / 30 / 54 / 126 km is 2 / 6 / 10 / 18 / 42 cells at 3 km). The fields
+The neighborhood widths are distances; they become cells for the grid in use,
+rounded up to an odd count because grid_stat requires one (6 / 18 / 30 / 54 /
+126 km is 1 / 3 / 5 / 9 / 21 cells at 6 km and 3 / 7 / 11 / 19 / 43 at 3 km, the
+latter covering 9 / 21 / 33 / 57 / 129 km). The fields
 are already on one grid, so there is no interpolation, and the only mask is the
 validity mask.
 
@@ -59,15 +61,23 @@ OUTPUT_FLAGS = ("ctc", "cts", "cnt", "sl1l2", "nbrctc", "nbrcnt")
 
 def neighbourhood_cells(widths_km, res_km):
     """Neighborhood widths in cells for this grid. A width that is not a whole
-    number of cells is an error, not a rounding."""
+    number of cells is an error. grid_stat accepts only odd widths (a square
+    centred on a cell), so an even count goes up to the next odd one: 6 km is
+    2 cells at 3 km and becomes 3, an effective 9 km."""
     cells = []
     for km in widths_km:
         n = km / res_km
         if abs(n - round(n)) > 1e-6 or round(n) < 1:
             raise ValueError(f"a {km:g} km neighborhood is {n:g} cells at "
                              f"{res_km:g} km; widths must be whole cells")
-        cells.append(int(round(n)))
+        n = int(round(n))
+        cells.append(n if n % 2 else n + 1)
     return cells
+
+
+def effective_km(widths_km, res_km):
+    """The distances the odd cell counts actually cover."""
+    return [c * res_km for c in neighbourhood_cells(widths_km, res_km)]
 
 
 def _thresholds(values):
@@ -93,8 +103,9 @@ def config_text(case):
 // Written by grid_stat_windows.py (plan E1); change the case YAML, not this file.
 // Thresholds are mm per 3 h. cnt_thresh NA scores every cell; the second
 // entry scores cells where either field is at least {s.wet_thresh_mm:g} mm.
-// Neighborhood widths are {", ".join(f"{k:g}" for k in s.widths_km)} km =
-// {", ".join(map(str, cells))} cells at {case.res_km:g} km.
+// Neighborhood widths are {", ".join(f"{k:g}" for k in s.widths_km)} km,
+// {", ".join(map(str, cells))} cells at {case.res_km:g} km (odd, as grid_stat
+// requires), covering {", ".join(f"{k:g}" for k in effective_km(s.widths_km, case.res_km))} km.
 
 model  = "${{MODEL}}";
 obtype = "{LABELS[case.truth_source]}";
@@ -315,7 +326,8 @@ def grid_stat_test_case(case):
     print(f"Config : {len(s.thresholds_mm)} thresholds "
           f"({s.thresholds_mm[0]:g}-{s.thresholds_mm[-1]:g} mm), "
           f"neighborhoods {list(map(float, s.widths_km))} km = "
-          f"{neighbourhood_cells(s.widths_km, case.res_km)} cells, "
+          f"{neighbourhood_cells(s.widths_km, case.res_km)} cells "
+          f"({effective_km(s.widths_km, case.res_km)} km), "
           f"wet cells >= {s.wet_thresh_mm:g} mm")
     conf = write_config(case)
     ok, why = mask_check.make_met_mask(case, pick["truth"],

@@ -110,8 +110,11 @@ def _case(tmp_path, mode="ok", **kw):
 
 def test_neighbourhood_widths_are_distances_in_whole_cells():
     km = (6, 18, 30, 54, 126)
-    assert gw.neighbourhood_cells(km, 3.0) == [2, 6, 10, 18, 42]
+    # grid_stat takes only odd widths: the even counts at 3 km go up one
+    assert gw.neighbourhood_cells(km, 3.0) == [3, 7, 11, 19, 43]
+    assert gw.effective_km(km, 3.0) == [9, 21, 33, 57, 129]
     assert gw.neighbourhood_cells(km, 6.0) == [1, 3, 5, 9, 21]
+    assert all(c % 2 for c in gw.neighbourhood_cells(km, 1.0))
     with pytest.raises(ValueError, match="whole cells"):
         gw.neighbourhood_cells(km, 4.0)
 
@@ -122,7 +125,7 @@ def test_config_asks_for_the_planned_scores_on_the_validity_mask(tmp_path):
     assert (">=0.5, >=1, >=2.5, >=5, >=10, >=25, >=50, >=75, >=100, "
             ">=125, >=150") in text
     assert "cnt_thresh = [ NA, >=0.5 ]; cnt_logic = UNION;" in text
-    assert "width      = [ 2, 6, 10, 18, 42 ];" in text
+    assert "width      = [ 3, 7, 11, 19, 43 ];" in text
     assert "cov_thresh = [ >=0.5 ];" in text
     assert 'poly = [ "${MASK_FILE}" ];' in text and "grid = [];" in text
     assert 'name = "${FCST_NAME}"' in text and 'name = "precip"' in text
