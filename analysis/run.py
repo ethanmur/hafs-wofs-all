@@ -2,6 +2,7 @@
 
     python analysis/run.py <case.yaml> <command> [--res-km N]
                                                [--sources stage4 mrms]
+                                               [--coast-km N]
 
 Loads a per-deployment case (deployment_case.py) and runs one command:
   build-grid    build this deployment's verification grid: the WoFS domain
@@ -77,6 +78,11 @@ Resolution is 6 km unless a case sets grid.res_km or the run passes --res-km;
 only a non-default resolution adds its label to output names, so the default
 run's files never move.
 
+The mask buffer is 150 km unless a case sets masks.coast_buffer_km or the run
+passes --coast-km N (e.g. 50 for the sensitivity test); another buffer adds
+`_coast<N>km` to the mask file and its figures. build-mask, plot-mask-check and
+every command that reads the mask take the flag, so pass it to each.
+
 Phase D is complete with the eyeball plots (D5b); see docs/analysis_plan.md.
 """
 
@@ -91,11 +97,12 @@ COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
 
 
 def parse_args(argv):
-    """(yaml_path, command, res_km, sources) from argv. The command is
-    required; --res-km N overrides the case's grid.res_km and --sources
-    stage4 mrms overrides its regrid.sources (None keeps the case's)."""
+    """(yaml_path, command, res_km, sources, coast_km) from argv. The command
+    is required; --res-km N overrides the case's grid.res_km, --sources
+    stage4 mrms its regrid.sources and --coast-km N its masks.coast_buffer_km
+    (None keeps the case's)."""
     argv = list(argv)
-    res_km = sources = None
+    res_km = sources = coast_km = None
     if "--sources" in argv:
         i = argv.index("--sources")
         j = i + 1
@@ -107,6 +114,16 @@ def parse_args(argv):
             print("--sources needs stage4 and/or mrms, e.g. --sources mrms")
             raise SystemExit(2)
         del argv[i:j]
+    if "--coast-km" in argv:
+        i = argv.index("--coast-km")
+        try:
+            coast_km = float(argv[i + 1])
+            if coast_km < 0:
+                raise ValueError
+        except (IndexError, ValueError):
+            print("--coast-km needs a non-negative number, e.g. --coast-km 50")
+            raise SystemExit(2)
+        del argv[i:i + 2]
     if "--res-km" in argv:
         i = argv.index("--res-km")
         try:
@@ -117,14 +134,14 @@ def parse_args(argv):
         del argv[i:i + 2]
     if len(argv) < 2:
         print("usage: run.py <case.yaml> <command> [--res-km N] "
-              "[--sources stage4 mrms]\n"
+              "[--sources stage4 mrms] [--coast-km N]\n"
               f"commands: {' | '.join(COMMANDS)}")
         raise SystemExit(2)
     yaml_path, command = argv[0], argv[1]
     if command not in COMMANDS:
         print(f"unknown command '{command}'; choose from {COMMANDS}")
         raise SystemExit(2)
-    return yaml_path, command, res_km, sources
+    return yaml_path, command, res_km, sources, coast_km
 
 
 def dispatch(case, command):
@@ -170,10 +187,11 @@ def dispatch(case, command):
 
 
 def main(argv):
-    yaml_path, command, res_km, sources = parse_args(argv)
+    yaml_path, command, res_km, sources, coast_km = parse_args(argv)
     import deployment_case
     import run_log
-    case = deployment_case.from_yaml(yaml_path, res_km=res_km, sources=sources)
+    case = deployment_case.from_yaml(yaml_path, res_km=res_km, sources=sources,
+                                     coast_km=coast_km)
     with run_log.tee(case, command):
         dispatch(case, command)
 

@@ -18,14 +18,14 @@ def test_parse_args_requires_command():
 def test_parse_args_accepts_every_current_command():
     for command in run.COMMANDS:
         assert run.parse_args(["case.yaml", command]) == (
-            "case.yaml", command, None, None)
+            "case.yaml", command, None, None, None)
 
 
 def test_parse_args_res_km_option_anywhere():
     assert run.parse_args(["c.yaml", "build-grid", "--res-km", "3"]) == (
-        "c.yaml", "build-grid", 3.0, None)
+        "c.yaml", "build-grid", 3.0, None, None)
     assert run.parse_args(["--res-km", "3", "c.yaml", "regrid-obs"]) == (
-        "c.yaml", "regrid-obs", 3.0, None)
+        "c.yaml", "regrid-obs", 3.0, None, None)
     for bad in (["c.yaml", "build-grid", "--res-km"],
                 ["c.yaml", "build-grid", "--res-km", "fine"]):
         try:
@@ -38,15 +38,15 @@ def test_parse_args_res_km_option_anywhere():
 def test_build_mask_is_a_command():
     assert "build-mask" in run.COMMANDS
     assert run.parse_args(["c.yaml", "build-mask"]) == (
-        "c.yaml", "build-mask", None, None)
+        "c.yaml", "build-mask", None, None, None)
 
 
 def test_parse_args_sources_option():
     assert run.parse_args(["c.yaml", "regrid-obs", "--sources", "mrms"]) == (
-        "c.yaml", "regrid-obs", None, ("mrms",))
+        "c.yaml", "regrid-obs", None, ("mrms",), None)
     assert run.parse_args(["c.yaml", "regrid-obs", "--sources", "stage4",
                            "mrms", "--res-km", "3"]) == (
-        "c.yaml", "regrid-obs", 3.0, ("stage4", "mrms"))
+        "c.yaml", "regrid-obs", 3.0, ("stage4", "mrms"), None)
     for bad in (["c.yaml", "regrid-obs", "--sources"],
                 ["c.yaml", "regrid-obs", "--sources", "aorc"]):
         try:
@@ -91,3 +91,19 @@ def _run_all():
 
 if __name__ == "__main__":
     _run_all()
+
+
+def test_parse_args_coast_km_option():
+    assert run.parse_args(["c.yaml", "build-mask", "--coast-km", "50"]) == (
+        "c.yaml", "build-mask", None, None, 50.0)
+    assert run.parse_args(["--coast-km", "50", "c.yaml", "build-mask",
+                           "--res-km", "3"]) == (
+        "c.yaml", "build-mask", 3.0, None, 50.0)
+    for bad in (["c.yaml", "build-mask", "--coast-km"],
+                ["c.yaml", "build-mask", "--coast-km", "near"],
+                ["c.yaml", "build-mask", "--coast-km", "-5"]):
+        try:
+            run.parse_args(bad)
+            assert False, f"{bad} should be rejected"
+        except SystemExit:
+            pass

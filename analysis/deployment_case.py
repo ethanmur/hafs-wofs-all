@@ -37,6 +37,7 @@ MASK_KEYS = {"coast_buffer_km", "ne_scale"}
 WOFS_KEYS = {"root", "available", "complete_windows"}
 HAFS_KEYS = {"lookback_h", "min_members", "init_start", "init_end", "models"}
 GRID_KEYS = {"res_km"}
+DEFAULT_COAST_KM = 150.0
 REGRID_KEYS = {"sources", "method", "width", "vld_thresh", "tolerance_pct",
                "met_bin_dir", "fields", "budget_check"}
 PLOT_KEYS = {"panels"}
@@ -72,7 +73,7 @@ def _resolution_dir(path, res_km):
 class MaskSettings:
     """The observation-validity rule: how far past US land the truth product
     is trusted, and which Natural Earth scale draws the coast."""
-    coast_buffer_km: float = 150.0
+    coast_buffer_km: float = DEFAULT_COAST_KM
     ne_scale: str = "50m"
 
 
@@ -157,6 +158,14 @@ class DeploymentCase:
         return "" if self.res_km == DEFAULT_RES_KM else f"_{self.res_label}"
 
     @property
+    def mask_suffix(self):
+        """"" at the default 150 km buffer; any other adds `_coast<N>km` to
+        the mask file and its figures, so a sensitivity run never overwrites
+        the default mask."""
+        km = self.masks.coast_buffer_km
+        return "" if km == DEFAULT_COAST_KM else f"_coast{km:g}km"
+
+    @property
     def grid_json_path(self):
         """Where build-grid writes this deployment's grid."""
         return self.grid_json_dir / f"{self.case_slug}{self.res_suffix}_grid.json"
@@ -168,19 +177,22 @@ class DeploymentCase:
     @property
     def mask_path(self):
         """The observation-validity mask, on this deployment's grid."""
-        return self.mask_dir / f"{self.case_slug}{self.res_suffix}_obs_valid.nc"
+        return self.mask_dir / (
+            f"{self.case_slug}{self.res_suffix}{self.mask_suffix}_obs_valid.nc")
 
     @property
     def mask_plot_path(self):
         return self.mask_plot_dir / (
-            f"{self.case_slug}{self.res_suffix}_obs_valid.png")
+            f"{self.case_slug}{self.res_suffix}{self.mask_suffix}"
+            "_obs_valid.png")
 
     def mask_check_path(self, end=None):
         """plot-mask-check figures, beside the mask map: one per window
         (named for its end), or the all-windows coverage summary."""
         tag = "coverage" if end is None else f"{end:%Y%m%d%H}"
         return self.mask_plot_dir / (
-            f"{self.case_slug}{self.res_suffix}_mask_check_{tag}.png")
+            f"{self.case_slug}{self.res_suffix}{self.mask_suffix}"
+            f"_mask_check_{tag}.png")
 
     @property
     def manifest_path(self):
@@ -294,10 +306,11 @@ class DeploymentCase:
         return self.wofs_root.parent.name
 
 
-def from_yaml(path, res_km=None, sources=None):
-    """The case in `path`. `res_km` overrides grid.res_km (run.py --res-km) and
-    `sources` overrides regrid.sources (run.py --sources), so another
-    resolution or obs product needs no edit to the YAML."""
+def from_yaml(path, res_km=None, sources=None, coast_km=None):
+    """The case in `path`. `res_km` overrides grid.res_km (run.py --res-km),
+    `sources` overrides regrid.sources (run.py --sources) and `coast_km`
+    overrides masks.coast_buffer_km (run.py --coast-km), so another
+    resolution, obs product or mask buffer needs no edit to the YAML."""
     path = Path(path)
     cfg = yaml.safe_load(path.read_text()) or {}
     _unknown(cfg, TOP_KEYS, "case")
@@ -338,7 +351,9 @@ def from_yaml(path, res_km=None, sources=None):
     _unknown(plots, PLOT_KEYS, "regrid_plots")
     masks = cfg.get("masks") or {}
     _unknown(masks, MASK_KEYS, "masks")
-    if float(masks.get("coast_buffer_km", 150.0)) < 0:
+    coast = float(coast_km if coast_km is not None
+                  else masks.get("coast_buffer_km", DEFAULT_COAST_KM))
+    if coast < 0:
         raise ValueError("masks.coast_buffer_km cannot be negative")
     panels = tuple(str(v) for v in (plots.get("panels") or ()))
     bad = [k for k in panels if k not in PLOT_PANELS]
@@ -381,7 +396,7 @@ def from_yaml(path, res_km=None, sources=None):
         wofs_regrid_3h_dir=Path(cfg["wofs_regrid_3h_dir"]),
         hafs_regrid_dir=Path(cfg["hafs_regrid_dir"]),
         masks=MaskSettings(
-            coast_buffer_km=float(masks.get("coast_buffer_km", 150.0)),
+            coast_buffer_km=coast,
             ne_scale=str(masks.get("ne_scale", "50m"))),
         log_dir=Path(cfg["log_dir"]),
         mrms_cache_dir=Path(cfg["mrms_cache_dir"]),

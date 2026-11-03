@@ -26,8 +26,8 @@ installs the required native GRIB and mapping libraries.
 
 One YAML per deployment lives in `storms/` (regenerate with
 `analysis/make_case_yamls.py`; do not edit scoring windows by hand). Run the
-steps in order; global flags `--res-km N` and `--sources stage4 mrms` apply to
-any of them.
+steps in order; global flags `--res-km N`, `--sources stage4 mrms` and `--coast-km N`
+(mask buffer, 150 km by default) apply to any of them.
 
 ```bash
 python analysis/run.py storms/<case>.yaml build-grid       # verification grid

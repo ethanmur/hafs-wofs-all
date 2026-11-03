@@ -478,6 +478,13 @@ water can be mostly outside it: Helene `20240927_d1` is 92% valid.
 `stats-regrid` adds a `valid` variant (every distribution and pair restricted to
 the mask) when this file exists.
 
+*Buffer sensitivity:* `--coast-km N` (or `masks.coast_buffer_km`) changes the
+150 km default, e.g. 50 km as the sensitivity test from other work. Any other
+value adds `_coast<N>km` to the mask file and its figures
+(`..._3km_coast50km_obs_valid.nc`), so the default mask and its clean names are
+never overwritten. Every command that reads the mask (`build-mask`,
+`plot-mask-check`, `plot-eyeball`, statistics) takes the same flag.
+
 *Caveat:* the NetCDF's MET Lambert global attributes are written from MET's
 convention, east-positive longitudes per the A2 lesson. Verified readable with
 `plot_data_plane <mask>.nc /tmp/m.ps 'name="obs_valid"; level="(*,*)";'`; if MET

@@ -226,3 +226,34 @@ def test_sources_override_replaces_the_yaml_without_editing_it(tmp_path):
     assert dc.from_yaml(path).plot_truth == "mrms"   # both sources -> truth_source
     with pytest.raises(ValueError):
         dc.from_yaml(path, sources=("aorc",))
+
+
+def test_coast_buffer_override_names_its_files_and_leaves_the_default_alone(
+        tmp_path):
+    path = _write(tmp_path, _generated(GOOD))
+    default = dc.from_yaml(path)
+    fifty = dc.from_yaml(path, coast_km=50.0)
+    assert default.masks.coast_buffer_km == 150.0 and default.mask_suffix == ""
+    assert default.mask_path.name == "2024_02l_beryl_20240708_d1_obs_valid.nc"
+    assert fifty.masks.coast_buffer_km == 50.0
+    assert fifty.mask_path.name == (
+        "2024_02l_beryl_20240708_d1_coast50km_obs_valid.nc")
+    assert fifty.mask_plot_path.name.endswith("_coast50km_obs_valid.png")
+    assert fifty.mask_check_path().name == (
+        "2024_02l_beryl_20240708_d1_coast50km_mask_check_coverage.png")
+    # with a non-default resolution too, resolution first
+    both = dc.from_yaml(path, res_km=3.0, coast_km=50.0)
+    assert both.mask_path.name == (
+        "2024_02l_beryl_20240708_d1_3km_coast50km_obs_valid.nc")
+    for attr in ("mask_path", "mask_plot_path"):
+        assert getattr(fifty, attr) != getattr(default, attr)
+    assert default.mask_check_path() != fifty.mask_check_path()
+
+
+def test_coast_buffer_can_come_from_the_yaml_and_the_flag_wins(tmp_path):
+    path = _write(tmp_path, dict(_generated(GOOD),
+                                 masks={"coast_buffer_km": 100}))
+    assert dc.from_yaml(path).mask_suffix == "_coast100km"
+    assert dc.from_yaml(path, coast_km=150.0).mask_suffix == ""
+    with pytest.raises(ValueError):
+        dc.from_yaml(path, coast_km=-1.0)
