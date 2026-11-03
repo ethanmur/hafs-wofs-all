@@ -12,7 +12,7 @@ _DIRS = ("grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
          "mrms_regrid_dir", "stage4_regrid_3h_dir", "mrms_regrid_3h_dir",
          "regrid_plot_dir", "eyeball_plot_dir", "hafs_check_plot_dir",
          "mask_dir", "mask_plot_dir", "manifest_dir", "wofs_regrid_1h_dir",
-         "wofs_regrid_3h_dir", "hafs_regrid_dir", "log_dir", "mrms_cache_dir", "stage4_cache_dir")
+         "wofs_regrid_3h_dir", "hafs_regrid_dir", "grid_stat_dir", "log_dir", "mrms_cache_dir", "stage4_cache_dir")
 
 
 def make_case(tmp_path, **overrides):

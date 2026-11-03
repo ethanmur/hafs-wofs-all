@@ -22,9 +22,9 @@ TOP_KEYS = {"storm_name", "storm_id", "deployment", "best_track",
             "mrms_regrid_dir", "stage4_regrid_3h_dir", "mrms_regrid_3h_dir",
             "regrid_plot_dir", "eyeball_plot_dir", "hafs_check_plot_dir",
             "mask_dir", "mask_plot_dir", "manifest_dir", "wofs_regrid_1h_dir",
-            "wofs_regrid_3h_dir", "hafs_regrid_dir", "log_dir", "mrms_cache_dir",
-            "stage4_cache_dir", "grid", "regrid", "regrid_plots", "masks",
-            "eyeball"}
+            "wofs_regrid_3h_dir", "hafs_regrid_dir", "grid_stat_dir", "log_dir",
+            "mrms_cache_dir", "stage4_cache_dir", "grid", "regrid",
+            "regrid_plots", "masks", "eyeball", "grid_stat"}
 # Where each kind of file goes. Similar files sit together, flat, under
 # data/ or figures/; there is no per-case output folder.
 PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
@@ -32,7 +32,7 @@ PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
              "regrid_plot_dir", "eyeball_plot_dir", "hafs_check_plot_dir",
              "mask_dir", "mask_plot_dir", "manifest_dir",
              "wofs_regrid_1h_dir", "wofs_regrid_3h_dir", "hafs_regrid_dir",
-             "log_dir")
+             "grid_stat_dir", "log_dir")
 MASK_KEYS = {"coast_buffer_km", "ne_scale"}
 WOFS_KEYS = {"root", "available", "complete_windows"}
 HAFS_KEYS = {"lookback_h", "min_members", "init_start", "init_end", "models"}
@@ -41,6 +41,8 @@ DEFAULT_COAST_KM = 150.0
 REGRID_KEYS = {"sources", "method", "width", "vld_thresh", "tolerance_pct",
                "met_bin_dir", "fields", "budget_check"}
 PLOT_KEYS = {"panels"}
+GRID_STAT_KEYS = {"thresholds_mm", "widths_km", "wet_thresh_mm", "cov_thresh",
+                  "test_end"}
 EYEBALL_KEYS = {"members", "windows", "cycles", "colorbar_style"}
 COLORBAR_STYLES = ("true_scale", "standard")
 PLOT_PANELS = ("compare-regrid", "compare-products", "compare-anomaly")
@@ -103,6 +105,22 @@ class EyeballSettings:
 
 
 @dataclass
+class GridStatSettings:
+    """The grid_stat configuration (plan E1). Thresholds are mm per 3 h.
+    Neighborhood widths are distances, converted to cells for the grid in use,
+    so a scale means the same distance at any resolution. `wet_thresh_mm`
+    defines the wet-cells-only continuous scores (either field at or above it);
+    `cov_thresh` is the event fraction a neighborhood needs to count as a hit.
+    `test_end` pins the window grid-stat-test scores (None: the wettest)."""
+    thresholds_mm: tuple = (0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 75.0,
+                            100.0, 125.0, 150.0)
+    widths_km: tuple = (6.0, 18.0, 30.0, 54.0, 126.0)
+    wet_thresh_mm: float = 0.5
+    cov_thresh: float = 0.5
+    test_end: Optional[datetime] = None
+
+
+@dataclass
 class DeploymentCase:
     case_slug: str
     storm_name: str
@@ -128,6 +146,7 @@ class DeploymentCase:
     wofs_regrid_1h_dir: Path   # data/wofs-regrid-1h/<dep>_<storm>/  WoFS 1 h accumulations
     wofs_regrid_3h_dir: Path   # data/wofs-regrid-3h/<dep>_<storm>/  WoFS 3 h accumulations
     hafs_regrid_dir: Path      # data/hafs-regrid/<dep>_<storm>/  + _<CONFIG> per HAFS configuration
+    grid_stat_dir: Path        # data/grid-stat/<dep>_<storm>/  config, mask, <window end>/ outputs
     log_dir: Path              # data/logs/
     mrms_cache_dir: Path
     stage4_cache_dir: Path
@@ -143,6 +162,7 @@ class DeploymentCase:
     masks: MaskSettings = field(default_factory=MaskSettings)
     regrid_panels: tuple = ()               # empty = every panel
     eyeball: EyeballSettings = field(default_factory=EyeballSettings)
+    grid_stat: GridStatSettings = field(default_factory=GridStatSettings)
 
     @property
     def output_slug(self):
@@ -193,6 +213,28 @@ class DeploymentCase:
         return self.mask_plot_dir / (
             f"{self.case_slug}{self.res_suffix}{self.mask_suffix}"
             f"_mask_check_{tag}.png")
+
+    @property
+    def grid_stat_tag(self):
+        """Resolution and mask-buffer suffixes: every grid_stat file carries
+        them, so a 6 km run or a 50 km coastal buffer never overwrites the
+        default one."""
+        return f"{self.res_suffix}{self.mask_suffix}"
+
+    @property
+    def grid_stat_conf_path(self):
+        return self.grid_stat_dir / (
+            f"GridStat_{self.case_slug}{self.grid_stat_tag}.conf")
+
+    @property
+    def grid_stat_mask_path(self):
+        """The validity mask as MET's own NetCDF, named FULL for grid_stat."""
+        return self.grid_stat_dir / (
+            f"{self.case_slug}{self.grid_stat_tag}_FULL_mask.nc")
+
+    def grid_stat_window_dir(self, end):
+        """One 3 h window's grid_stat output, named by its end."""
+        return self.grid_stat_dir / f"{end:%Y%m%d%H}"
 
     @property
     def manifest_path(self):
@@ -336,6 +378,23 @@ def from_yaml(path, res_km=None, sources=None, coast_km=None):
     _unknown(grid, GRID_KEYS, "grid")
     regrid = cfg.get("regrid") or {}
     _unknown(regrid, REGRID_KEYS, "regrid")
+    gs = cfg.get("grid_stat") or {}
+    _unknown(gs, GRID_STAT_KEYS, "grid_stat")
+    defaults = GridStatSettings()
+    gs_settings = GridStatSettings(
+        thresholds_mm=tuple(float(v) for v in
+                            gs.get("thresholds_mm", defaults.thresholds_mm)),
+        widths_km=tuple(float(v) for v in
+                        gs.get("widths_km", defaults.widths_km)),
+        wet_thresh_mm=float(gs.get("wet_thresh_mm", defaults.wet_thresh_mm)),
+        cov_thresh=float(gs.get("cov_thresh", defaults.cov_thresh)),
+        test_end=(parse_stamp(gs["test_end"], "grid_stat.test_end")
+                  if gs.get("test_end") is not None else None))
+    if (not gs_settings.thresholds_mm or min(gs_settings.thresholds_mm) < 0
+            or not gs_settings.widths_km or min(gs_settings.widths_km) <= 0
+            or not 0 < gs_settings.cov_thresh <= 1):
+        raise ValueError("grid_stat needs thresholds >= 0, widths > 0 and "
+                         "0 < cov_thresh <= 1")
     eyeball = cfg.get("eyeball") or {}
     _unknown(eyeball, EYEBALL_KEYS, "eyeball")
     style = str(eyeball.get("colorbar_style", "true_scale"))
@@ -395,6 +454,8 @@ def from_yaml(path, res_km=None, sources=None, coast_km=None):
         wofs_regrid_1h_dir=Path(cfg["wofs_regrid_1h_dir"]),
         wofs_regrid_3h_dir=Path(cfg["wofs_regrid_3h_dir"]),
         hafs_regrid_dir=Path(cfg["hafs_regrid_dir"]),
+        grid_stat_dir=Path(cfg["grid_stat_dir"]),
+        grid_stat=gs_settings,
         masks=MaskSettings(
             coast_buffer_km=coast,
             ne_scale=str(masks.get("ne_scale", "50m"))),

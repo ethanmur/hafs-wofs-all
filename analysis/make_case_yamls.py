@@ -128,6 +128,8 @@ def path_lines(storm_name, deployment, orion=ORION):
         f"{deployment}_{storm_name.lower()}/",
         f"hafs_regrid_dir: {orion}/data/hafs-regrid/"
         f"{deployment}_{storm_name.lower()}/",
+        f"grid_stat_dir: {orion}/data/grid-stat/"
+        f"{deployment}_{storm_name.lower()}/",
         f"mask_dir:        {orion}/data/obs-valid-masks/",
         f"mask_plot_dir:   {orion}/figures/obs-valid-masks/",
         f"log_dir:         {orion}/data/logs/",

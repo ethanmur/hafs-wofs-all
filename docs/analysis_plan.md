@@ -856,19 +856,45 @@ inland West domains and Milton's Florida coast first.
 
 *Check:* by eye, per storm; a disagreement is fixed in `masks.py` before E1.
 
-### E1. `grid_stat` configuration
+### E1. `grid_stat` configuration (`grid_stat_windows.py`)
+
+    python analysis/run.py storms/<case>.yaml grid-stat-test --res-km 3
+
 - resolution: run at one resolution, the 3 km grid. Every output name carries
-  `_3km` (the `--res-km` rule), so a later 6 km run writes beside it, never over it
-- thresholds: 0.5 / 1 / 2.5 / 5 / 10 / 25 / 50 mm per 3 h
-- mask: `FULL` = whole deployment grid ∩ `obs_valid` (one region now)
-- neighborhood widths defined in km: 6 / 18 / 30 / 54 / 126 km, which is 1 / 3 / 5 / 9 / 21 cells at 6 km (2 / 6 / 10 / 18 / 42 at 3 km), so the scales mean the same distances at any resolution
-- line types: `CTC CTS CNT SL1L2 NBRCTC NBRCNT`
+  `_3km` (the `--res-km` rule), and `_coast<N>km` off the 150 km buffer, so a
+  later 6 km run or the 50 km sensitivity writes beside it, never over it
+- thresholds, mm per 3 h: 0.5 / 1 / 2.5 / 5 / 10 / 25 / 50 / 75 / 100 / 125 / 150.
+  The top four are very rare events; most windows will have none, so their
+  statistics are only meaningful pooled. Kept for now; drop them if they stay empty
+- mask: `FULL` = whole deployment grid ∩ `obs_valid` (one region now), built as a
+  MET NetCDF by `gen_vx_mask` from the validity mask, and the only region
+  (`mask.grid = []`)
+- neighborhood widths defined in km: 6 / 18 / 30 / 54 / 126 km, which is 1 / 3 / 5 / 9 / 21 cells at 6 km (2 / 6 / 10 / 18 / 42 at 3 km), so the scales mean the same distances at any resolution. The even 3 km widths are untried: if `grid_stat` rejects them, fall back to odd widths. `cov_thresh` >= 0.5
+- line types: `CTC CTS CNT SL1L2 NBRCTC NBRCNT`. The continuous types (`CNT`,
+  `SL1L2`) are written twice per run, over all cells (`cnt_thresh` NA) and over wet
+  cells only (either field >= 0.5 mm, `cnt_logic = UNION`), since dry cells
+  flatter RMSE, MAE and correlation. Both are poolable
 - `interp` none (already on a common grid)
+- settings live in the case YAML's optional `grid_stat:` block (`thresholds_mm`,
+  `widths_km`, `wet_thresh_mm`, `cov_thresh`, `test_end`); the configuration
+  file itself is generated, with the forecast field, model label, mask file and
+  output prefix passed as environment variables
+
+`grid-stat-test` writes the configuration, builds the mask, and scores one
+window, the wettest with WoFS, HAFS and truth files (or `grid_stat.test_end`):
+one WoFS member and the shortest-lead cycle of each HAFS configuration against
+truth. Files go to `data/grid-stat/<dep>_<storm>/`: the config, the mask, and a
+`<window end>/` folder of `.stat` files and logs. It prints row counts per line
+type against what the configuration asks for (11 each for `CTC`/`CTS`, 2 for
+`CNT`/`SL1L2`, 55 each for `NBRCTC`/`NBRCNT`), the hits, misses, POD, FAR, CSI
+and ETS per threshold, and bias, RMSE and MAE for all and wet cells. The third
+pairing in E2, WoFS member vs HAFS cycle, is not part of this test.
 
 *Check:* run one window, read the ASCII output by hand, confirm POD/FAR/ETS
-are sane at a low threshold.
+are sane at a low threshold; the row counts match; the neighborhood points are
+the squared widths; the `FULL` mask is the only mask.
 
-*MET:* `grid_stat`.
+*MET:* `grid_stat`, `gen_vx_mask`.
 
 ### E2. Run across all windows, individual runs
 Three pairings per window, all on the same cells:

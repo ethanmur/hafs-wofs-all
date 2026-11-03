@@ -41,6 +41,7 @@ python analysis/run.py storms/<case>.yaml window-obs       # obs 3 h windows
 python analysis/run.py storms/<case>.yaml plot-eyeball     # WoFS | HAFS | truth panels
 python analysis/run.py storms/<case>.yaml plot-hafs-check  # native vs regridded HAFS
 python analysis/run.py storms/<case>.yaml plot-mask-check    # validity mask vs truth windows
+python analysis/run.py storms/<case>.yaml grid-stat-test     # E1: grid_stat on one window
 ```
 
 `plot-regrid` and `stats-regrid` are the obs-product checks. The regrid steps
@@ -76,6 +77,7 @@ analysis/
   obs_windows.py      obs 3 h windows (D5)
   eyeball_plots.py    eyeball and HAFS check panels (D5b)
   mask_check.py       validity mask vs truth windows (E0b)
+  grid_stat_windows.py grid_stat configuration and one-window test (E1)
   obs_regrid_plots.py / obs_regrid_stats.py / plot_common.py / plot_units.py
   met_regrid.py       MET regrid_data_plane wrapper and budget check
   stage4_hourly.py    Stage IV hourly access

@@ -68,27 +68,39 @@ def class_counts(code):
     return {name: int((code == c).sum()) for c, name in CLASS_NAMES.items()}
 
 
+def make_met_mask(case, grid_file, out_path, name=MET_MASK_NAME):
+    """The validity mask as MET's own NetCDF on `grid_file`'s grid, via
+    gen_vx_mask: variable `name`, 1 inside the mask. Returns (True, "") or
+    (False, reason). grid_stat reads this file as its mask region."""
+    try:
+        tool = met_regrid.met_tool("gen_vx_mask", case.regrid.met_bin_dir)
+    except FileNotFoundError as err:
+        return False, str(err)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [str(tool), str(grid_file), str(case.mask_path), str(out_path),
+           "-type", "data", "-mask_field",
+           f'name="{masks.MASK_NAME}"; level="(*,*)";',
+           "-thresh", "gt0.5", "-name", name]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0 or not out_path.exists():
+        tail = (proc.stderr or proc.stdout).strip().splitlines()[-3:]
+        return False, "gen_vx_mask failed: " + " | ".join(tail)
+    return True, ""
+
+
 def met_reads_mask(case, truth_path):
     """Run the mask file through gen_vx_mask on the truth window's grid.
 
     Returns (boolean array MET produced, "") or (None, reason). The truth
     window is MET's own output, so its grid is one MET reads; if MET reads
     the mask file with a different grid it refuses or returns other cells."""
-    try:
-        tool = met_regrid.met_tool("gen_vx_mask", case.regrid.met_bin_dir)
-    except FileNotFoundError as err:
-        return None, str(err)
     import netCDF4
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "mask_by_met.nc"
-        cmd = [str(tool), str(truth_path), str(case.mask_path), str(out),
-               "-type", "data", "-mask_field",
-               f'name="{masks.MASK_NAME}"; level="(*,*)";',
-               "-thresh", "gt0.5", "-name", MET_MASK_NAME]
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-        if proc.returncode != 0 or not out.exists():
-            tail = (proc.stderr or proc.stdout).strip().splitlines()[-3:]
-            return None, "gen_vx_mask failed: " + " | ".join(tail)
+        ok, why = make_met_mask(case, truth_path, out)
+        if not ok:
+            return None, why
         with netCDF4.Dataset(out) as nc:
             values = np.ma.filled(
                 nc.variables[MET_MASK_NAME][:].astype(float), np.nan)

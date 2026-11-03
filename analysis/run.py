@@ -53,6 +53,13 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 and over all of them, plus a check that MET's gen_vx_mask
                 reads the mask file. Figures beside the mask map. Needs
                 build-mask and window-obs
+  grid-stat-test
+                E1 test: write the grid_stat configuration and score one
+                window (the wettest, or grid_stat.test_end): one WoFS member and
+                the shortest-lead cycle of each HAFS configuration against the
+                truth on the validity mask, into <grid_stat_dir>; prints the
+                row counts and scores to check by hand. Needs build-mask,
+                regrid-wofs, regrid-hafs, window-obs and `module load met`
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself
@@ -93,7 +100,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
             "regrid-hafs", "window-obs", "plot-eyeball",
-            "plot-hafs-check", "plot-mask-check", "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
+            "plot-hafs-check", "plot-mask-check", "grid-stat-test",
+            "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
 
 
 def parse_args(argv):
@@ -173,6 +181,9 @@ def dispatch(case, command):
     if command == "plot-mask-check":
         from mask_check import plot_mask_check
         return plot_mask_check(case)
+    if command == "grid-stat-test":
+        from grid_stat_windows import grid_stat_test_case
+        return grid_stat_test_case(case)
     if command == "download-obs":
         import obs_cases
         return obs_cases.download_obs(case)
