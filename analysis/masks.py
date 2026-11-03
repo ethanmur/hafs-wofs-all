@@ -189,7 +189,12 @@ def write_mask_netcdf(path, spec, mask, lat, lon, name=MASK_NAME,
             f"1 where Stage IV / MRMS coverage is trusted: within "
             f"{buffer_km:g} km of US land, excluding land masses not "
             f"connected to the US")
-        # MET NetCDF grid definition (Lambert conformal).
+        # MET NetCDF grid definition (Lambert conformal). Without MET_version
+        # MET falls back to its METv2.0 grid parser and reads these attributes
+        # as a different grid entirely (gen_vx_mask: "Mask Grid ... Lat_LL
+        # 81.000"); with it, x_pin / y_pin count from 0, as met_grid_attrs
+        # writes them.
+        nc.MET_version = "V12.2.0"
         for key, value in vg.met_grid_attrs(spec).items():
             setattr(nc, key, value)
         nc.mask_name = name

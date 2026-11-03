@@ -106,6 +106,8 @@ def test_mask_netcdf_round_trips_and_carries_the_met_grid(tmp_path):
     assert again.shape == (spec.ny, spec.nx) and (again == mask).all()
     with netCDF4.Dataset(path) as nc:
         assert nc.Projection == "Lambert Conformal"
+        # without it MET reads the grid with its METv2.0 parser, wrongly
+        assert nc.MET_version == "V12.2.0" and float(nc.x_pin) == 0.0
         assert nc.nx == str(spec.nx) and nc.ny == str(spec.ny)
         assert float(nc.d_km.split()[0]) == spec.res_km
         assert masks.MASK_NAME in nc.variables
