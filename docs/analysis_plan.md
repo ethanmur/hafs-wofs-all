@@ -753,9 +753,10 @@ The headline carries the budget change and the native/regridded maxima from the
 
 **Colour scale** (`eyeball.colorbar_style`): `true_scale` (default) is a log
 scale in inches from 0.01 to 5 in with 20 levels, the QPF ladder's colours
-blended into a continuous ramp, dry cells white, cells with no data grey, and
-values past 5 in on the open end of the bar; `standard` is the banded ladder
-(the existing QPF levels, shown in inches). Both are in `plot_common.py`
+blended into a continuous ramp; cells below 0.01 in (dry and trace rain) are not
+drawn, so the coastlines and borders underneath stay visible, cells with no
+data are grey, and values past 5 in sit on the open end of the bar; `standard` is the banded ladder
+(the existing QPF levels, shown in inches; its first, white band is not drawn). Both are in `plot_common.py`
 (`precip_scale`, `draw_precip`) and used by `map_figure`'s `"precip"` style; the
 obs-regrid maps (`plot-regrid`) keep the banded scale unless switched.
 

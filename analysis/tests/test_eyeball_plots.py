@@ -160,6 +160,29 @@ def test_standard_scale_is_the_banded_ladder_in_inches():
         pc.precip_scale("rainbow")
 
 
+def test_dry_and_trace_cells_are_not_drawn_so_the_map_shows_through():
+    mm = np.array([[0.0, 0.1, 0.3, 5.0], [np.nan, 30.0, 200.0, 0.0]])
+    drawn = pc.precip_drawn(mm, "true_scale")            # floor 0.01 in = 0.254 mm
+    assert drawn.tolist() == [[False, False, True, True],
+                              [False, True, True, False]]
+    std = pc.precip_drawn(np.array([0.0, 2.0, 5.0, 50.0]), "standard")
+    assert std.tolist() == [False, False, True, True]    # first band is "no rain"
+
+
+def test_an_entirely_dry_field_still_draws_with_its_colour_bar(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    lat, lon = _latlon()
+    fig, ax = plt.subplots(subplot_kw={"projection": ccrs.PlateCarree()})
+    for style in pc.COLORBAR_STYLES:
+        cf, scale = pc.draw_precip(ax, lon, lat, np.zeros_like(lat), style)
+        fig.colorbar(cf, ticks=scale["ticks"], extend="max")
+    fig.savefig(tmp_path / "dry.png")
+    plt.close(fig)
+
+
 # --- the commands -----------------------------------------------------------
 
 def test_plot_eyeball_writes_one_figure_per_window_cycle_and_member(tmp_path):

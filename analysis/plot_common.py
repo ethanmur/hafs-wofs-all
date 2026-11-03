@@ -57,19 +57,30 @@ def precip_scale(style=DEFAULT_COLORBAR_STYLE):
                                                     vmax=LOG_VMAX_IN)),
                 "ticks": [t for t in LOG_TICK_CANDIDATES
                           if LOG_FLOOR_IN <= t <= LOG_VMAX_IN],
-                "format": "%g", "extend": "max"}
+                "format": "%g", "extend": "max", "draw_min": LOG_FLOOR_IN}
     if style == "standard":
         levels = np.asarray(inches(np.asarray(QPF_LEVELS, dtype=float)))
+        # The ladder's first band (white) is "no rain": not drawn.
         return {"levels": levels, "kwargs": dict(colors=QPF_COLORS),
-                "ticks": levels[::2], "format": "%.2g", "extend": "max"}
+                "ticks": levels[::2], "format": "%.2g", "extend": "max",
+                "draw_min": float(levels[1])}
     raise ValueError(f"Unknown colorbar_style: {style!r} "
                      f"(use one of {COLORBAR_STYLES})")
 
 
+def precip_drawn(data_mm, style=DEFAULT_COLORBAR_STYLE):
+    """Boolean array: the cells a map of `data_mm` paints. Values below the
+    scale's lowest level (dry and trace rain) and missing cells are left
+    undrawn, so the coastlines and borders underneath stay visible."""
+    data = np.asarray(inches(np.asarray(data_mm, dtype=float)))
+    with np.errstate(invalid="ignore"):
+        return np.isfinite(data) & (data >= precip_scale(style)["draw_min"])
+
+
 def draw_precip(ax, lon, lat, data_mm, style=DEFAULT_COLORBAR_STYLE):
     """Filled contours of precipitation (mm in, inches drawn) on a cartopy
-    axis. Returns (mappable, scale) for the colour bar. Dry cells take the
-    lowest colour (white); cells with no data are drawn grey."""
+    axis. Returns (mappable, scale) for the colour bar. Cells below the
+    scale's lowest level are not drawn; cells with no data are drawn grey."""
     scale = precip_scale(style)
     data = np.ma.masked_invalid(np.asarray(inches(np.asarray(data_mm,
                                                              dtype=float))))
@@ -79,14 +90,30 @@ def draw_precip(ax, lon, lat, data_mm, style=DEFAULT_COLORBAR_STYLE):
                       cmap=mcolors.ListedColormap([NODATA_COLOR]),
                       shading="nearest", transform=ccrs.PlateCarree(),
                       zorder=1)
-    floor = scale["levels"][0]
-    # Contours exclude values on the lowest level, so lift dry cells just
-    # above it rather than leave holes.
-    data = np.ma.clip(data, floor * 1.0001 if floor > 0 else 1e-6, None)
+    data = np.ma.masked_where(~precip_drawn(data_mm, style), data)
+    if data.mask.all():
+        # Nothing to paint (a dry field): contourf cannot draw an empty set,
+        # so give the colour bar an invisible equivalent instead.
+        return _empty_mappable(ax, lon, lat, scale), scale
     cf = ax.contourf(lon, lat, data, levels=scale["levels"],
                      extend=scale["extend"], transform=ccrs.PlateCarree(),
                      zorder=2, **scale["kwargs"])
     return cf, scale
+
+
+def _empty_mappable(ax, lon, lat, scale):
+    """An invisible contour set with the scale's levels and colours."""
+    lo, hi = scale["levels"][0], scale["levels"][1]
+    field = np.full(np.shape(lon), (lo + hi) / 2.0)
+    cf = ax.contourf(lon, lat, field, levels=scale["levels"],
+                     extend=scale["extend"], transform=ccrs.PlateCarree(),
+                     zorder=2, **scale["kwargs"])
+    if hasattr(cf, "set_visible"):
+        cf.set_visible(False)
+    else:                                    # matplotlib < 3.8
+        for artist in cf.collections:
+            artist.set_visible(False)
+    return cf
 
 
 def add_us_geography(ax):
