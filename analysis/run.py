@@ -68,6 +68,12 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 lists every run in grid_stat_runs_<case>.csv. WoFS-vs-HAFS
                 comparison is a later join of these results. Needs build-mask,
                 regrid-wofs, regrid-hafs, window-obs and `module load met`
+  parse-stat    E3: read every .stat file of the case and write one tidy CSV
+                per line type (ctc cts cnt sl1l2 nbrctc nbrcnt) into
+                data/grid-stat/csvs/, with model, member, init and valid time
+                taken from the MODEL tag and window folder. Exits non-zero
+                listing missing runs, wrong row counts or duplicate keys.
+                Plain Python; runs on a login node after grid-stat
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself
@@ -109,7 +115,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
             "regrid-hafs", "window-obs", "plot-eyeball",
             "plot-hafs-check", "plot-mask-check", "grid-stat-test", "grid-stat",
-            "download-obs", "regrid-obs", "plot-regrid", "stats-regrid")
+            "parse-stat", "download-obs", "regrid-obs", "plot-regrid",
+            "stats-regrid")
 
 
 def parse_args(argv):
@@ -195,6 +202,9 @@ def dispatch(case, command):
     if command == "grid-stat":
         from grid_stat_windows import grid_stat_case
         return grid_stat_case(case)
+    if command == "parse-stat":
+        from stat_tables import parse_stat_case
+        return parse_stat_case(case)
     if command == "download-obs":
         import obs_cases
         return obs_cases.download_obs(case)

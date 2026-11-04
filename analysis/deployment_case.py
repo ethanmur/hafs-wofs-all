@@ -238,6 +238,17 @@ class DeploymentCase:
         return self.grid_stat_dir / (
             f"grid_stat_runs_{self.case_slug}{self.grid_stat_tag}.csv")
 
+    @property
+    def stat_csv_dir(self):
+        """The parsed .stat tables of every case: data/grid-stat/csvs/, beside
+        the per-case grid-stat folders."""
+        return self.grid_stat_dir.parent / "csvs"
+
+    def stat_csv_path(self, line_type):
+        """One parsed line type of this case, e.g. stat_ctc_<case>_3km.csv."""
+        return self.stat_csv_dir / (
+            f"stat_{line_type.lower()}_{self.case_slug}{self.grid_stat_tag}.csv")
+
     def grid_stat_window_dir(self, end):
         """One 3 h window's grid_stat output, named by its end."""
         return self.grid_stat_dir / f"{end:%Y%m%d%H}"

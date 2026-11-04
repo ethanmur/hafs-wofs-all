@@ -114,6 +114,22 @@ Revised 2026-10-19 for the WoFS-domain scope (previous plan: best-track grid,
 - **Resolution advantage is reported, not hidden.** FSS across a range of
   neighborhood scales, since WoFS was run at 3 km and budget interpolation from
   HAFS's 6 km adds no information.
+- **HAFS 0-3 h spin-up bucket is excluded (decided 2026-11-03).** A HAFS
+  cycle is a member of a window only if it was initialized *strictly before the
+  window start*. The cycle initialized exactly at the window start is dropped:
+  its first 3 h precipitation bucket (lead 0-3 h) is model spin-up, not a
+  forecast of that window, so scoring it would count a known-unreliable
+  accumulation against HAFS. For window end 2024-10-09 21Z (start 18Z) the
+  c2024100918 cycles of HFSA and HFSB are therefore absent; they first appear
+  at window end 2024-10-10 00Z (lead 3-6 h). The shortest HAFS lead in the
+  verification is 3-6 h, not 0-3 h. **Asymmetry to state in the write-up:** the
+  WoFS member initialized at the window start *is* scored (lead 0-3 h),
+  because WoFS starts from an assimilated analysis with no comparable spin-up
+  concern, so WoFS has a shorter minimum lead than HAFS. Anyone comparing the
+  two by lead time must account for this. The rule lives in `hafs_windows.py`
+  (D4); reversing it means regenerating the HAFS windows and rerunning
+  `grid-stat`. `lead_h` in the E3 tables is the lead at window end, so a
+  0-3 h bucket is `lead_h = 3` and can always be filtered on.
 
 ### Open items
 
@@ -925,16 +941,51 @@ file is skipped and named.
 *Check:* runtime per window (printed per run and in total), total output size
 (printed), and that the per-window run counts match the work list in the CSV.
 
-### E3. Parse into the long CSV schema
-Columns: `storm, deployment, model, run_id, member, init, valid_time,
-window_h, lead_h, mask, threshold_mm, scale_km, stat_name, value`; the G3
-proximity columns join by window when that analysis is done.
+### E3. Parse the `.stat` files into per-case CSVs (`stat_tables.py`)
+
+    python analysis/run.py storms/<case>.yaml parse-stat --res-km 3
+
+One CSV per line type per case, in `data/grid-stat/csvs/` (the folder beside
+the per-case grid-stat folders), named `stat_<linetype>_<case>[_3km][_coast50km].csv`:
+`ctc, cts, cnt, sl1l2, nbrctc, nbrcnt`. Cases stay separate; E4 concatenates
+them to pool. Line types have different value columns, so they are separate
+files, not one wide table.
+
+Identity columns, every file: `case, storm, deployment, truth, source`
+(`wofs|hfsa|hfsb`), `member` (WoFS `m00`...; blank for HAFS), `init_time`,
+`valid_start`, `valid_end`, `lead_h` (lead at window end, so a first-bucket
+forecast is 3), then `thresh_mm` (CTC, CTS, NBRCTC, NBRCNT), `nbr_cells`,
+`nbr_width_km`, `cov_thresh` (neighborhood types), or `cell_set` (`all|wet`)
+and `wet_thresh_mm` (CNT, SL1L2). `NA` becomes an empty cell, never 0.
+
+Time fields come from the `MODEL` tag (`wofs_m00_i202410092100`,
+`hfsa_c2024100918`) and the window-end folder name, **never** from the `.stat`
+time columns (WoFS lead 0, valid 1970).
+
+Value columns:
+
+- `ctc`, `nbrctc`: `total, fy_oy, fy_on, fn_oy, fn_on`, plus derived `pod, far,
+  csi, ets, fbias` from the counts (empty when a denominator is 0).
+- `cts`: `total, baser, fmean, acc, fbias, pod, podn, pofd, far, csi, ets` (MET's
+  GSS), `hk, hss`; confidence-interval columns dropped (bootstrapping is off).
+- `nbrcnt`: `total, fbs, fss, afss, ufss, f_rate, o_rate`.
+- `cnt`: `total, fbar, fstdev, obar, ostdev, pr_corr, me, estdev, mbias, mae,
+  mse, bcmse, rmse`.
+- `sl1l2`: `total, fbar, obar, fobar, ffbar, oobar, mae` (the partial sums E4
+  pools).
+
+The checklist is `grid_stat_runs_<case>.csv` (else the work list). The command
+writes what it can, then exits non-zero listing: runs with no `.stat` file, files
+whose row counts differ from the configuration (`expected_rows`), duplicate
+keys, and an `.stat` whose MODEL tag disagrees with the run expected.
 
 `lead_h` per model makes matched-lead comparison and the HAFS
 initialization-degradation test (HAFS f24–f27 vs WoFS f00–f03, same valid
-window) filters on this table, not new code.
+window) filters on these tables, not new code. The G3 proximity columns join by
+window when that analysis is done.
 
-*Check:* row counts match windows x thresholds x scales per run.
+*Check:* row counts match runs x thresholds x scales; derived CTC scores equal
+MET's CTS; SL1L2 `fbar`/`obar`/`mae` equal CNT's.
 
 ### E4. Pooling
 Aggregate contingency counts and partial sums *before* deriving scores. Never
