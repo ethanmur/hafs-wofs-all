@@ -750,6 +750,8 @@ hourly regrid is incomplete shows up here as `missing_hours`.
 ### D5b. Eyeball panels: WoFS | HAFS | truth (`eyeball_plots.py`)
 
     python analysis/run.py storms/<case>.yaml plot-eyeball [--res-km N]
+        [--members 0 3 6 9] [--windows N] [--cycles N | --cycle-every-h N]
+        [--domain wide|wofs]
     python analysis/run.py storms/<case>.yaml plot-hafs-check [--res-km N]
 
 Before any score is computed, look at the fields. `plot-eyeball` draws one
@@ -768,6 +770,14 @@ configuration (the shortest-lead and the longest-lead cycle of the lookback),
 panel is the run with the shortest lead for the window. Panels are drawn
 unclipped with the deployment outline and, when `build-mask` has run, the
 validity region outlined; the best track is drawn up to the window end.
+
+One-run overrides of that block: `--members 0 3 6 9`, `--windows N`, `--cycles N`,
+`--cycle-every-h N` (cycles initialized at multiples of N hours of the day, e.g.
+12 keeps the 00Z and 12Z cycles; overrides `--cycles`) and `--domain wide|wofs`.
+`wide` (default) frames the deployment with a margin; `wofs` is the deployment
+grid alone, where every pixel has data, and adds `_wofsdomain` to the figure
+names so the two sets never overwrite each other. They apply to `plot-eyeball`
+and `plot-hafs-check` only.
 
 `plot-hafs-check` is the HAFS regrid's own look: for the same windows and
 cycles, the native 3 h bucket read straight from the parent file next to the

@@ -39,6 +39,7 @@ python analysis/run.py storms/<case>.yaml download-obs     # login node: fetch M
 python analysis/run.py storms/<case>.yaml regrid-obs       # hourly obs on the grid
 python analysis/run.py storms/<case>.yaml window-obs       # obs 3 h windows
 python analysis/run.py storms/<case>.yaml plot-eyeball     # WoFS | HAFS | truth panels
+#   one-run overrides: --members 0 3 6 9  --windows 5  --cycle-every-h 12  --domain wide|wofs
 python analysis/run.py storms/<case>.yaml plot-hafs-check  # native vs regridded HAFS
 python analysis/run.py storms/<case>.yaml plot-mask-check    # validity mask vs truth windows
 python analysis/run.py storms/<case>.yaml grid-stat-test     # E1: grid_stat on one window

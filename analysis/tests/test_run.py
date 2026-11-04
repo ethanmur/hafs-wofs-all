@@ -1,3 +1,4 @@
+import pytest
 import sys
 from pathlib import Path
 
@@ -107,3 +108,27 @@ def test_parse_args_coast_km_option():
             assert False, f"{bad} should be rejected"
         except SystemExit:
             pass
+
+
+def test_plot_flags_are_split_off_before_the_usual_parse():
+    argv, plot = run.split_plot_options(
+        ["c.yaml", "plot-eyeball", "--members", "0", "3", "6", "9",
+         "--windows", "5", "--cycle-every-h", "12", "--domain", "wofs",
+         "--res-km", "3"])
+    assert argv == ["c.yaml", "plot-eyeball", "--res-km", "3"]
+    assert plot == {"members": (0, 3, 6, 9), "windows": 5,
+                    "cycle_every_h": 12, "domain": "wofs"}
+    assert run.split_plot_options(["c.yaml", "grid-stat"]) == (
+        ["c.yaml", "grid-stat"], {})
+
+
+def test_plot_flags_reject_bad_values():
+    for bad in (["--domain", "tiny"], ["--domain"], ["--windows", "0"],
+                ["--windows", "x"], ["--members"], ["--members", "-1"]):
+        with pytest.raises(SystemExit):
+            run.split_plot_options(["c.yaml", "plot-eyeball", *bad])
+
+
+def test_plot_flags_only_apply_to_the_plot_commands(tmp_path):
+    with pytest.raises(SystemExit):
+        run.main(["c.yaml", "grid-stat", "--domain", "wofs"])

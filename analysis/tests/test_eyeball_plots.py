@@ -286,3 +286,56 @@ def test_plot_commands_skip_an_unavailable_deployment(tmp_path):
         with pytest.raises(SystemExit) as err:
             fn(case)
         assert "no complete WoFS window" in str(err.value)
+
+
+# --- the map extent and the cycle stride -------------------------------------
+
+def _with_eyeball(case, **kw):
+    import dataclasses
+    return dataclasses.replace(case, eyeball=dataclasses.replace(
+        case.eyeball, **kw))
+
+
+def test_wofs_domain_is_the_grid_alone_and_wide_has_a_margin(tmp_path):
+    case = make_case(tmp_path)
+    lat, lon = _latlon()
+    wide = ep.plotting_domain(case, lat, lon)
+    tight = ep.plotting_domain(_with_eyeball(case, domain="wofs"), lat, lon)
+    assert tight == (28.0, 31.0, -86.0, -83.0)
+    assert wide[0] < tight[0] and wide[1] > tight[1]
+    assert wide[2] < tight[2] and wide[3] > tight[3]
+
+
+def test_cycle_every_h_keeps_the_cycles_at_those_hours():
+    from types import SimpleNamespace
+    runs = [(T(2024, 7, 7, h) + timedelta(days=d), f"p{d}{h}")
+            for d in range(2) for h in (0, 6, 12, 18)]
+    keep = ep.pick_cycles(runs, SimpleNamespace(cycle_every_h=12, cycles=2))
+    assert [r[0].hour for r in keep] == [0, 12, 0, 12]
+    spread = ep.pick_cycles(runs, SimpleNamespace(cycle_every_h=None,
+                                                  cycles=2))
+    assert spread == [runs[0], runs[-1]]
+
+
+def test_the_wofs_domain_figures_are_named_apart_from_the_wide_ones(tmp_path):
+    case = _with_eyeball(_case(tmp_path), domain="wofs", cycle_every_h=24,
+                         members=(0,), windows=1)
+    written = ep.plot_eyeball(case)
+    assert written and all(p.name.endswith("_wofsdomain.png") for p in written)
+    assert all(p.exists() for p in written)
+    # 1 window x 2 configs x (the 00Z cycles of 07/00 and 08/00 -> 2) x 1
+    assert len(written) == 4
+
+
+def test_settings_parse_cycle_every_h_and_domain(tmp_path):
+    from test_deployment_case import GOOD, _generated, _write
+    assert dc.EyeballSettings().domain == "wide"
+    assert dc.EyeballSettings().cycle_every_h is None
+    with pytest.raises(ValueError, match="domain"):
+        dc.from_yaml(_write(tmp_path, {**_generated(GOOD),
+                                       "eyeball": {"domain": "tiny"}}))
+    case = dc.from_yaml(_write(tmp_path, {**_generated(GOOD),
+                                          "eyeball": {"domain": "wofs",
+                                                      "cycle_every_h": 12}}))
+    assert (case.eyeball.domain, case.eyeball.cycle_every_h) == ("wofs", 12)
+    assert case.plot_domain_suffix == "_wofsdomain"

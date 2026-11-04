@@ -104,6 +104,13 @@ passes --coast-km N (e.g. 50 for the sensitivity test); another buffer adds
 `_coast<N>km` to the mask file and its figures. build-mask, plot-mask-check and
 every command that reads the mask take the flag, so pass it to each.
 
+plot-eyeball and plot-hafs-check take one-run overrides of the case's
+`eyeball:` block: --members 0 3 6 9, --windows N, --cycles N (spread evenly),
+--cycle-every-h N (cycles initialized at multiples of N hours; overrides
+--cycles) and --domain wide|wofs. `wide` (default) frames the deployment with a
+margin; `wofs` zooms to the deployment grid alone and adds `_wofsdomain` to the
+figure names, so the two sets never overwrite each other.
+
 Phase D is complete with the eyeball plots (D5b); see docs/analysis_plan.md.
 """
 
@@ -167,6 +174,49 @@ def parse_args(argv):
     return yaml_path, command, res_km, sources, coast_km
 
 
+PLOT_FLAGS = ("--members", "--windows", "--cycles", "--cycle-every-h",
+              "--domain")
+
+
+def split_plot_options(argv):
+    """(argv without the plot flags, {EyeballSettings field: value}).
+    --members 0 3 6 9, --windows N, --cycles N, --cycle-every-h N and
+    --domain wide|wofs override the case's `eyeball:` block for one run of
+    plot-eyeball or plot-hafs-check."""
+    argv, found, i = list(argv), {}, 0
+    while i < len(argv):
+        flag = argv[i]
+        if flag not in PLOT_FLAGS:
+            i += 1
+            continue
+        j = i + 1
+        while j < len(argv) and not argv[j].startswith("--") \
+                and (flag == "--members" or j == i + 1):
+            j += 1
+        values = argv[i + 1:j]
+        del argv[i:j]
+        try:
+            if flag == "--members":
+                found["members"] = tuple(int(v) for v in values)
+                if not found["members"] or min(found["members"]) < 0:
+                    raise ValueError
+            elif flag == "--domain":
+                if values not in (["wide"], ["wofs"]):
+                    raise ValueError
+                found["domain"] = values[0]
+            else:
+                if len(values) != 1 or int(values[0]) < 1:
+                    raise ValueError
+                found[flag[2:].replace("-", "_")] = int(values[0])
+        except ValueError:
+            print(f"{flag} needs "
+                  + {"--members": "member numbers, e.g. --members 0 3 6 9",
+                     "--domain": "wide or wofs, e.g. --domain wofs"}.get(
+                         flag, "a whole number >= 1, e.g. " + flag + " 5"))
+            raise SystemExit(2)
+    return argv, found
+
+
 def dispatch(case, command):
     """Run one command for a loaded DeploymentCase."""
     if command == "build-grid":
@@ -219,11 +269,20 @@ def dispatch(case, command):
 
 
 def main(argv):
+    argv, plot = split_plot_options(argv)
     yaml_path, command, res_km, sources, coast_km = parse_args(argv)
+    if plot and command not in ("plot-eyeball", "plot-hafs-check"):
+        print(f"{', '.join('--' + k.replace('_', '-') for k in plot)} "
+              "only apply to plot-eyeball and plot-hafs-check")
+        raise SystemExit(2)
+    import dataclasses
     import deployment_case
     import run_log
     case = deployment_case.from_yaml(yaml_path, res_km=res_km, sources=sources,
                                      coast_km=coast_km)
+    if plot:
+        case = dataclasses.replace(
+            case, eyeball=dataclasses.replace(case.eyeball, **plot))
     with run_log.tee(case, command):
         dispatch(case, command)
 

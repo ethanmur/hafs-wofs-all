@@ -96,6 +96,32 @@ def runs_for(directory, end, model, res_label):
     return sorted(out)
 
 
+def plotting_domain(case, lat, lon):
+    """(lat_min, lat_max, lon_min, lon_max) of the maps: the deployment framed
+    with a margin (`wide`), or the deployment grid alone (`wofs`), where every
+    pixel is inside the WoFS domain and the precipitation structure fills the
+    panel."""
+    if case.eyeball.domain == "wofs":
+        return (float(lat.min()), float(lat.max()),
+                float(lon.min()), float(lon.max()))
+    return centred_domain(lat, lon)
+
+
+def pick_cycles(runs, settings):
+    """The HAFS cycles of one configuration to draw: those initialized at a
+    multiple of `cycle_every_h` hours of the day, else `cycles` spread
+    evenly."""
+    if settings.cycle_every_h:
+        return [r for r in runs if r[0].hour % settings.cycle_every_h == 0]
+    return pick_evenly(runs, settings.cycles)
+
+
+def cycles_text(settings):
+    if settings.cycle_every_h:
+        return f"cycles every {settings.cycle_every_h} h"
+    return f"{settings.cycles} cycles"
+
+
 def lead_text(init, window):
     start = (window.start - init).total_seconds() / 3600
     end = (window.end - init).total_seconds() / 3600
@@ -128,7 +154,7 @@ def selection(case, need_wofs, need_truth):
     out = []
     for w, wofs, hafs in pick_evenly(found, settings.windows):
         picks = [(c, init, path) for c, runs in hafs.items()
-                 for init, path in pick_evenly(runs, settings.cycles)]
+                 for init, path in pick_cycles(runs, settings)]
         out.append({"window": w, "wofs": wofs[-1] if wofs else None,
                     "hafs": picks})
     return out
@@ -165,15 +191,15 @@ def plot_eyeball(case):
     truth_source = case.plot_truth
     print(f"Truth  : {LABELS[truth_source]}; WoFS members "
           f"{', '.join(map(str, s.members))}; up to {s.windows} windows x "
-          f"{s.cycles} cycles per HAFS configuration; colour scale "
-          f"{s.colorbar_style}")
+          f"{cycles_text(s)} per HAFS configuration; colour scale "
+          f"{s.colorbar_style}; {s.domain} map extent")
     if not chosen:
         print("\nNo window has WoFS, HAFS and truth 3 h files together. Run "
               "regrid-wofs, regrid-hafs and window-obs first.")
         return []
     first_truth = case.obs_window_path(truth_source, chosen[0]["window"].end)
     lat, lon, ref = met_regrid.read_regridded(first_truth)
-    domain = centred_domain(lat, lon)
+    domain = plotting_domain(case, lat, lon)
     overlays = _overlays(case, lat, lon)
     track = parse_bdeck(case.best_track)
     out_dir = case.eyeball_plot_dir
@@ -198,7 +224,8 @@ def plot_eyeball(case):
                           f"({members.shape[0]} members); skipped")
                     continue
                 out = out_dir / (f"eyeball_{w.end:%Y%m%d%H}_{config.lower()}_"
-                                 f"c{h_init:%Y%m%d%H}_m{m:02d}.png")
+                                 f"c{h_init:%Y%m%d%H}_m{m:02d}"
+                                 f"{case.plot_domain_suffix}.png")
                 map_figure(
                     [(f"WoFS member {m:02d}, init {w_init:%d %H%MZ} "
                       f"({lead_text(w_init, w)})", lat, lon, members[m],
@@ -244,8 +271,9 @@ def plot_hafs_check(case, reader=None):
                          "WoFS window; nothing to plot.")
     chosen = selection(case, need_wofs=False, need_truth=False)
     s = case.eyeball
-    print(f"HAFS   : up to {s.windows} windows x {s.cycles} cycles per "
-          f"configuration; colour scale {s.colorbar_style}")
+    print(f"HAFS   : up to {s.windows} windows x {cycles_text(s)} per "
+          f"configuration; colour scale {s.colorbar_style}; {s.domain} map "
+          "extent")
     if not chosen:
         print("\nNo window has a regridded HAFS file. Run regrid-hafs first.")
         return []
@@ -253,7 +281,7 @@ def plot_hafs_check(case, reader=None):
                for j in hw.work_list(case, wm.build_manifest(case))}
     first = chosen[0]["hafs"][0][2]
     lat, lon, ref = met_regrid.read_regridded(first)
-    domain = centred_domain(lat, lon)
+    domain = plotting_domain(case, lat, lon)
     overlays = _overlays(case, lat, lon)
     track = parse_bdeck(case.best_track)
     prior = {c: hw.load_prior(case.hafs_budget_csv_path(c))
@@ -288,7 +316,8 @@ def plot_hafs_check(case, reader=None):
             row = prior[config].get((f"{init:{wm.STAMP}}",
                                      f"{w.end:{wm.STAMP}}"))
             out = out_dir / (f"hafs_check_{w.end:%Y%m%d%H}_{config.lower()}_"
-                             f"c{init:%Y%m%d%H}.png")
+                             f"c{init:%Y%m%d%H}"
+                             f"{case.plot_domain_suffix}.png")
             map_figure(
                 [native_panel,
                  (f"{config} regridded, {case.res_km:g} km grid", lat, lon,

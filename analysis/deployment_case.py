@@ -43,7 +43,9 @@ REGRID_KEYS = {"sources", "method", "width", "vld_thresh", "tolerance_pct",
 PLOT_KEYS = {"panels"}
 GRID_STAT_KEYS = {"thresholds_mm", "widths_km", "wet_thresh_mm", "cov_thresh",
                   "test_end"}
-EYEBALL_KEYS = {"members", "windows", "cycles", "colorbar_style"}
+EYEBALL_KEYS = {"members", "windows", "cycles", "cycle_every_h", "domain",
+                "colorbar_style"}
+PLOT_DOMAINS = ("wide", "wofs")
 COLORBAR_STYLES = ("true_scale", "standard")
 PLOT_PANELS = ("compare-regrid", "compare-products", "compare-anomaly")
 
@@ -97,10 +99,15 @@ class EyeballSettings:
     """How much plot-eyeball and plot-hafs-check draw: every pair would be
     thousands of figures, so only a few windows, HAFS cycles and WoFS members.
     `windows` and `cycles` are counts, spread evenly (first, last, between);
-    `members` are WoFS member numbers."""
+    `cycle_every_h` instead keeps the cycles initialized at multiples of that
+    many hours (12: the 00Z and 12Z ones) and overrides `cycles`; `members` are
+    WoFS member numbers. `domain` is the map extent: `wide` frames the
+    deployment with a margin (default), `wofs` is the deployment grid alone."""
     members: tuple = (0, 9)
     windows: int = 3
     cycles: int = 2
+    cycle_every_h: Optional[int] = None
+    domain: str = "wide"
     colorbar_style: str = "true_scale"
 
 
@@ -237,6 +244,12 @@ class DeploymentCase:
         """One row per (window, run) the last `grid-stat` considered."""
         return self.grid_stat_dir / (
             f"grid_stat_runs_{self.case_slug}{self.grid_stat_tag}.csv")
+
+    @property
+    def plot_domain_suffix(self):
+        """Eyeball and HAFS-check figures of the zoomed `wofs` extent carry
+        this in their names, so they never overwrite the default wide ones."""
+        return "" if self.eyeball.domain == "wide" else "_wofsdomain"
 
     @property
     def stat_csv_dir(self):
@@ -423,6 +436,13 @@ def from_yaml(path, res_km=None, sources=None, coast_km=None):
             or int(eyeball.get("windows", 3)) < 1
             or int(eyeball.get("cycles", 2)) < 1):
         raise ValueError("eyeball needs members >= 0 and windows, cycles >= 1")
+    every = eyeball.get("cycle_every_h")
+    if every is not None and int(every) < 1:
+        raise ValueError("eyeball.cycle_every_h must be at least 1")
+    domain = str(eyeball.get("domain", "wide"))
+    if domain not in PLOT_DOMAINS:
+        raise ValueError(f"eyeball.domain must be one of {PLOT_DOMAINS}, "
+                         f"got {domain!r}")
     plots = cfg.get("regrid_plots") or {}
     _unknown(plots, PLOT_KEYS, "regrid_plots")
     masks = cfg.get("masks") or {}
@@ -493,7 +513,9 @@ def from_yaml(path, res_km=None, sources=None, coast_km=None):
         regrid_panels=panels,
         eyeball=EyeballSettings(
             members=members, windows=int(eyeball.get("windows", 3)),
-            cycles=int(eyeball.get("cycles", 2)), colorbar_style=style),
+            cycles=int(eyeball.get("cycles", 2)),
+            cycle_every_h=int(every) if every is not None else None,
+            domain=domain, colorbar_style=style),
     )
     unknown_fields = set(case.regrid.fields) - set(TRUTH_SOURCES)
     if unknown_fields:
