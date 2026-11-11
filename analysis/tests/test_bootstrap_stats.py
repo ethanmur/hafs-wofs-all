@@ -193,3 +193,18 @@ def test_matching_that_leaves_nothing_is_skipped_not_a_crash(tmp_path, capsys):
 def test_an_empty_folder_is_an_error(tmp_path):
     with pytest.raises(SystemExit, match="parse-stat"):
         bs.bootstrap_all(tmp_path, tag="_3km", n_boot=100)
+
+
+def test_differences_work_for_a_blank_key_under_pandas_3_strings():
+    """The all-cells rows of sl1l2 have an empty wet_thresh_mm; pandas 3's
+    string dtype keeps that missing, which broke joining the key as text."""
+    old = pd.options.future.infer_string
+    try:
+        pd.options.future.infer_string = True
+        df = pd.concat([_sl1l2([1.0, 2.0, 3.0, 4.0], source="wofs"),
+                        _sl1l2([2.0, 2.0, 5.0, 4.0], source="hfsa")])
+        _, diff = _boot(df, lt="sl1l2", diffs=True)
+    finally:
+        pd.options.future.infer_string = old
+    assert len(diff) == 1
+    assert diff.iloc[0]["mae_diff"] == pytest.approx(2.5 - 3.25)

@@ -137,7 +137,11 @@ def bootstrap_group(df, line_type, keys, n_boot, rng, diffs):
 
 def _differences(table, keys, names, point, draws, n_boot):
     other = [k for k in keys if k != "source"]
-    tag = table[other].astype(str).agg("|".join, axis=1)
+    # one text key per group; built row by row because astype(str) keeps NaN
+    # (the all-cells wet_thresh_mm) as a missing value in pandas 3
+    tag = pd.Series(["|".join(map(str, row)) for row in
+                     table[other].itertuples(index=False, name=None)],
+                    index=table.index)
     by_source = {s: pd.Series(table.index[table["source"] == s].to_numpy(),
                               index=tag[table["source"] == s].to_numpy())
                  for s in table["source"].unique()}
