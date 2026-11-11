@@ -45,6 +45,8 @@ python analysis/run.py storms/<case>.yaml plot-mask-check    # validity mask vs 
 python analysis/run.py storms/<case>.yaml grid-stat-test     # E1: grid_stat on one window
 python analysis/run.py storms/<case>.yaml grid-stat          # E2: every window, every run (one SLURM job per deployment)
 python analysis/run.py storms/<case>.yaml parse-stat         # E3: .stat files -> data/grid-stat/csvs/stat_<linetype>_<case>.csv
+python analysis/pool_stats.py --csv-dir data/grid-stat/csvs  # E4: pooled scores (laptop or Orion; no MET needed)
+python analysis/bootstrap_stats.py --csv-dir data/grid-stat/csvs --matched leads  # E4b: window-bootstrap CIs, paired differences, leave-one-storm-out
 ```
 
 `plot-regrid` and `stats-regrid` are the obs-product checks. The regrid steps
@@ -82,6 +84,8 @@ analysis/
   mask_check.py       validity mask vs truth windows (E0b)
   grid_stat_windows.py grid_stat configuration, one-window test (E1), all-window run (E2)
   stat_tables.py       .stat files -> one tidy CSV per line type per case (E3)
+  pool_stats.py        pooled scores from summed counts and partial sums (E4)
+  bootstrap_stats.py   window-bootstrap intervals, paired differences, leave-one-storm-out (E4b)
   obs_regrid_plots.py / obs_regrid_stats.py / plot_common.py / plot_units.py
   met_regrid.py       MET regrid_data_plane wrapper and budget check
   stage4_hourly.py    Stage IV hourly access

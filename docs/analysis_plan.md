@@ -1004,10 +1004,73 @@ depending on each run's base rate and N, so the mean of ratios is not the
 ratio of means. Pool across windows within a deployment first; pooling across
 deployments is a choice made when the question requires it.
 
-*MET:* `stat_analysis -job aggregate_stat` — CTC->CTS for ETS/CSI/POD/FAR,
-SL1L2->CNT for RMSE/MAE/ME/bias, NBRCTC->NBRCTS and NBRCNT for FSS.
+**Implemented in Python (`pool_stats.py`), not `stat_analysis`**, so it runs on
+a laptop (no MET) as well as on Orion; the arithmetic is the same sums:
 
-*Check:* a pooled ETS recomputed by hand from summed counts for one threshold.
+    python analysis/pool_stats.py --csv-dir data/grid-stat/csvs [--out-dir DIR]
+        [--tag _3km] [--level case storm all] [--matched windows|leads]
+
+It reads the E3 tables and writes `pooled_<level>_<ctc|nbrctc|sl1l2|nbrcnt>
+<tag>[_matched_<mode>].csv`. A row is one (source, lead_h, threshold, scale or
+cell set) with all windows, members and cycles of the level pooled in; levels are
+`case`, `storm` and `all`. Counts (`ctc`, `nbrctc`) are summed and POD, FAR, CSI,
+ETS (GSS), FBIAS, HK, HSS, POFD, PODN, ACC, BASER and FMEAN derived from the sums;
+SL1L2 partial means are weighted by `total` and ME, MSE, RMSE, MAE, MBIAS,
+standard deviations and correlation derived; NBRCNT FBS is weighted by `total`
+and FSS = 1 - FBS / FBS_worst with FBS_worst recovered per run as
+FBS / (1 - FSS) (FSS empty or 1 means both fields were dry, worst case 0), UFSS
+= 0.5 + o_rate / 2. Rounding of FBS and FSS to 5 decimals in the `.stat` file is
+the only loss.
+
+Each row carries `n_runs`, `n_windows` and, for counts, `obs_events` (hits +
+misses): a threshold with few events is noise whatever its score, so figures
+should hide or mark those. A WoFS row scores the typical *member* (all members
+pooled), not the ensemble; ensemble mean and probability-matched mean are Phase G.
+
+Windows are not the same across sources (HAFS has fewer: lead >= 6 h, 6-hourly
+cycles, and some deployments have a single HAFS run), so a WoFS-vs-HAFS comparison
+should use `--matched windows` (same windows, any lead) or `--matched leads` (the
+same windows and lead, which here is lead_h 6 at windows ending 00/06/12/18Z).
+The log prints windows and runs per case and source.
+
+*Check:* done in the tests: the pooled ETS of one threshold equals the ETS of the
+hand-summed counts (and not the mean of per-run ETS), and a single pooled run
+reproduces MET's CTS, CNT and NBRCNT values from the real `.stat` fixtures.
+
+### E4b. Uncertainty: window bootstrap and leave-one-storm-out (`bootstrap_stats.py`)
+
+    python analysis/bootstrap_stats.py --csv-dir data/grid-stat/csvs
+        [--out-dir DIR] [--tag _3km] [--level all storm case]
+        [--matched windows|leads] [--n-boot 1000] [--seed 0] [--no-loo]
+
+A window is one 3 h valid-time block of one deployment; all runs, thresholds and
+scales of a window are resampled together, which keeps the correlation between
+the 18 WoFS members, HAFS cycles and thresholds. Each resample draws as many
+windows as there are, with replacement, re-adds the counts and partial sums and
+derives the scores as in E4. The 2.5th and 97.5th percentiles of `--n-boot`
+(1000) resamples are `<score>_lo` / `<score>_hi` beside the all-window point
+estimate; an interval is left empty when fewer than 90 % of resamples define the
+score. With 12 windows there are C(23, 12) = 1,352,078 distinct resamples (stars
+and bars: 12 draws and 11 dividers over 12 windows), so 1,000 draws are nearly
+all different. Windows of one storm are correlated and the resampling ignores
+that: read the interval as a lower bound.
+
+*Storm resampling is deliberately not used for intervals:* 4 storms have only
+C(7, 4) = 35 distinct resamples. Instead **leave-one-storm-out** recomputes the
+pooled table without each storm in turn (`dropped_storm`, plus "(none)" for the
+full sample): a sensitivity check, not an interval.
+
+With `--matched` the paired differences WoFS - HFSA, WoFS - HFSB and HFSA - HFSB
+are scored on the same resampled windows (`bootdiff_*.csv`: `<score>_diff`, `_lo`,
+`_hi`); a difference whose interval contains zero is not distinguishable from
+none. Without `--matched` the sources cover different windows, so no differences
+are written. Outputs: `boot_<level>_<linetype><tag>[_matched_<mode>].csv`,
+`bootdiff_...`, `loo_storm_<linetype>...`.
+
+*Check (in the tests):* identical windows give a zero-width interval at the
+pooled estimate; the bootstrap of a mean over 200 windows has the textbook
+standard error sd / sqrt(n); the same seed repeats; leave-one-storm-out equals
+the pooled table of the remaining storms.
 
 ### E5. Accumulation diagnostics
 Keep the Python distribution and Q-Q summaries on the 3 h fields. Along/across
@@ -1075,7 +1138,7 @@ matches the README.
 | `regrid_data_plane` | budget regridding of obs and forecasts to the deployment grid |
 | `pcp_combine` | WoFS 3 h absolute-clock accumulation |
 | `grid_stat` | categorical, continuous, and neighborhood scores |
-| `stat_analysis` | pooling counts and partial sums across runs and windows |
+| `stat_analysis` | pooling counts and partial sums across runs and windows (done in `pool_stats.py` instead, so it also runs without MET) |
 | `plot_data_plane` | quick raster QC of MET NetCDF output |
 
 **Available but not used, and why**
