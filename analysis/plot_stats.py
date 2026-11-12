@@ -20,6 +20,10 @@ gain _allwindows):
     boot_all_{ctc,sl1l2}_3km.csv                          lead curves, lead 6 h
     boot_all_{ctc,sl1l2}_3km_allleads.csv                 all leads summed
 
+With --first-bucket include the same figures read the *_withspinup tables
+(HAFS 0-3 h bucket pooled; fixed lead curves from *_matched_fixed-spinup_*)
+and their names gain _withspinup.
+
 Scores: ETS, CSI, frequency bias, POD, success ratio (1 - FAR) and RMSE, each
 with its 95 % window-bootstrap band.
 
@@ -86,6 +90,21 @@ SAMPLE_SETS = {
     },
 }
 SAMPLES = dict(SAMPLE_SETS["matched"])       # the set in use; make_all sets it
+
+
+def spinup_samples(samples):
+    """The samples for tables pooled with --first-bucket include: every file
+    ending gains _withspinup, and the fixed-lead curves use the other window
+    family (HAFS leads 3, 9 ... 51; --matched fixed-spinup), which is the one
+    with a 0-3 h point."""
+    out = {k: (e + "_withspinup", d) for k, (e, d) in samples.items()}
+    if "_matched_fixed" in samples["fixed"][0]:
+        out["fixed"] = ("_matched_fixed-spinup_withspinup",
+                        "fixed windows, with the HAFS 0-3 h bucket")
+    else:
+        out["fixed"] = (out["fixed"][0],
+                        "all available windows, with the HAFS 0-3 h bucket")
+    return out
 
 
 # =============================================================================
@@ -486,20 +505,24 @@ def plot_all_performance(ctc, sample, fig_dir, tag, dpi):
 
 def make_all(pooled_dir, fig_dir, tag="_3km", only=("lead", "thresh", "perf"),
              dpi=150, log=print, bands=True, max_thresh=None,
-             sample_set="matched"):
+             sample_set="matched", first_bucket="exclude"):
     """[Path] of every figure written. `bands` draws the bootstrap bands and
     crosses; `max_thresh` drops thresholds above it (mm); `sample_set` is
     "matched" (same windows for every model) or "all" (every available window;
-    figure names gain _allwindows)."""
+    figure names gain _allwindows). `first_bucket` "include" reads the
+    _withspinup tables (HAFS 0-3 h bucket pooled) and adds _withspinup to the
+    figure names."""
     SETTINGS["bands"], SETTINGS["max_thresh"] = bands, max_thresh
     SAMPLES.clear()
-    SAMPLES.update(SAMPLE_SETS[sample_set])
+    SAMPLES.update(spinup_samples(SAMPLE_SETS[sample_set])
+                   if first_bucket == "include" else SAMPLE_SETS[sample_set])
     tables = load(pooled_dir, tag)
     if not tables:
         raise SystemExit(f"plot_stats: no boot_all_*{tag}*.csv tables in "
                          f"{pooled_dir}; run bootstrap_stats.py first.")
     # from here `tag` only names the figures
-    tag = ("_allwindows" if sample_set == "all" else "") + tag
+    tag = (("_allwindows" if sample_set == "all" else "") + tag
+           + ("_withspinup" if first_bucket == "include" else ""))
     written = []
 
     def note(what, paths):
@@ -574,12 +597,17 @@ def main(argv=None):
                     help="matched: models on the same windows (fair); all: "
                          "every available window of each model (names gain "
                          "_allwindows); default both")
+    ap.add_argument("--first-bucket", choices=("exclude", "include"),
+                    default="exclude",
+                    help="HAFS 0-3 h bucket: exclude (default) or include (reads "
+                         "the _withspinup tables; names gain _withspinup)")
     a = ap.parse_args(argv)
     sets = ("matched", "all") if a.sample_set == "both" else (a.sample_set,)
     for s in sets:
         print(f"--- sample set: {s}")
         make_all(a.pooled_dir, a.fig_dir, a.tag, tuple(a.only), a.dpi,
-                 bands=not a.no_bands, max_thresh=a.max_thresh, sample_set=s)
+                 bands=not a.no_bands, max_thresh=a.max_thresh, sample_set=s,
+                 first_bucket=a.first_bucket)
 
 
 if __name__ == "__main__":

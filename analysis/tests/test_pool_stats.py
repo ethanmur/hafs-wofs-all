@@ -271,3 +271,60 @@ def test_the_exclusion_flags(tmp_path, capsys):
     ps.main(["--csv-dir", str(d), "--out-dir", str(tmp_path / "o2"),
              "--level", "all"])
     assert "Excluded : 2024_02l_beryl_20240710_d1" in capsys.readouterr().out
+
+
+# --- the HAFS 0-3 h (spin-up) bucket ------------------------------------------
+
+def _spin_frame(tmp_path):
+    rows = [_ctc("hfsa", 5, 3, 2, 90, lead=3), _ctc("hfsa", 5, 3, 2, 90, lead=6),
+            _ctc("wofs", 5, 3, 2, 90, lead=3), _ctc("wofs", 5, 3, 2, 90, lead=6)]
+    p = tmp_path / "stat_ctc_2024_14l_milton_20241009_d1_3km.csv"
+    pd.DataFrame(rows).to_csv(p, index=False)
+    return tmp_path
+
+
+def test_load_drops_hafs_lead_3_by_default_but_keeps_wofs_lead_3(tmp_path):
+    d = _spin_frame(tmp_path)
+    got = ps.load(d, "ctc", "_3km")
+    assert sorted(zip(got["source"], got["lead_h"])) == [
+        ("hfsa", 6), ("wofs", 3), ("wofs", 6)]
+    inc = ps.load(d, "ctc", "_3km", first_bucket="include")
+    assert len(inc) == 4
+    with pytest.raises(ValueError):
+        ps.load(d, "ctc", "_3km", first_bucket="maybe")
+
+
+def test_first_bucket_names_and_fixed_spinup_needs_include():
+    assert ps.name_suffix("fixed-spinup", first_bucket="include") == \
+        "_matched_fixed-spinup_withspinup"
+    assert ps.name_suffix("windows") == "_matched_windows"
+    with pytest.raises(SystemExit):
+        ps.check_first_bucket("fixed-spinup", "exclude")
+    ps.check_first_bucket("fixed-spinup", "include")
+
+
+def test_fixed_spinup_keeps_the_windows_with_leads_3_9_to_51():
+    rows = []
+    for win in ("2024-10-10 03:00", "2024-10-10 06:00"):
+        leads = list(range(3, 52, 6)) if win.endswith("03:00") \
+            else list(range(6, 49, 6))
+        rows += [_ctc("hfsa", 1, 1, 1, 10, window=win, lead=l) for l in leads]
+        rows += [_ctc("wofs", 1, 1, 1, 10, window=win, lead=l)
+                 for l in (3, 4, 5, 6)]
+    df = pd.DataFrame(rows)
+    got = ps.matched(df, "fixed-spinup")
+    assert set(got["valid_end"]) == {"2024-10-10 03:00"}
+    assert set(got[got["source"] == "hfsa"]["lead_h"]) == set(range(3, 52, 6))
+
+
+def test_pool_all_writes_withspinup_files(tmp_path):
+    d = _spin_frame(tmp_path)
+    out = tmp_path / "o"
+    got = ps.pool_all(d, out, levels=("all",), log=lambda *_: None,
+                      first_bucket="include")
+    assert got[("all", "ctc")].name == "pooled_all_ctc_3km_withspinup.csv"
+    table = pd.read_csv(got[("all", "ctc")])
+    assert 3 in set(table[table["source"] == "hfsa"]["lead_h"])
+    plain = ps.pool_all(d, out, levels=("all",), log=lambda *_: None)
+    table = pd.read_csv(plain[("all", "ctc")])
+    assert 3 not in set(table[table["source"] == "hfsa"]["lead_h"])

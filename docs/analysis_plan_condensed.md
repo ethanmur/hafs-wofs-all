@@ -8,7 +8,7 @@ in the full plan; ✅ done, 🔧 built but unchecked on real data, ⏳ to do.
 ## Next up (Phase F work queue, in order)
 
 1. 🔧 `plot-hafs-tracks`: best track now drawn over the HAFS tracks, final-position circles on top; check on real a-decks.
-2. ⏳ 0-3 h period for HAFS and WoFS with a `--first-bucket include|exclude` toggle (WoFS already has it as `lead_h` 3; HAFS needs D4 relaxed, regrid, grid-stat, parse).
+2. 🔧 0-3 h HAFS period: built (`hafs.include_spinup` / `--include-spinup`, `--first-bucket exclude|include`, `--matched fixed-spinup`, `--spinup-only` eyeball flag); run on Orion, default stays exclude until you see the plots.
 3. ⏳ WoFS and HAFS ensembles (HFSA, HFSB, all HAFS): ensemble mean and PMM scored like members, then paired comparison with members.
 4. ⏳ Inland vs landfalling verification: you classify domains/windows from the storm-location tables, then repeat the statistics per class.
 - ⏳ G3 stratification (storm distance): step 1 (`storm-location` printout) done; check all 11 domains, then the stratification.
@@ -30,7 +30,7 @@ in the full plan; ✅ done, 🔧 built but unchecked on real data, ⏳ to do.
 - ✅ HAFS-A and HAFS-B are separate models, never pooled by default.
 - ✅ Truth is MRMS at 3 km, Stage IV the backup, switched by `truth_source`.
 - ✅ The resolution advantage is reported, not hidden (FSS across scales).
-- ✅ HAFS 0-3 h spin-up bucket excluded (decided 2026-11-03); WoFS at the window start is kept (lead 0-3 h); to be revisited by the 0-3 h task above.
+- ✅ HAFS 0-3 h spin-up bucket excluded (decided 2026-11-03); WoFS at the window start is kept (lead 0-3 h); 0-3 h toggle built (`--first-bucket`, default exclude); default to be re-decided after the example plots.
 
 ### Open items
 
@@ -107,7 +107,7 @@ in the full plan; ✅ done, 🔧 built but unchecked on real data, ⏳ to do.
 
 - 🔧 G3 storm-location stratification: `storm-location` printout of distances to the TC and to landfall per window; stratification pending.
 - 🔧 `plot-hafs-tracks` and `plot-tc-location` per domain and window (a-decks via `fetch_bdecks.py --adeck`), to be checked on real data.
-- ⏳ Work queue (see Next up): HAFS tracks best-track edit, 0-3 h period, ensembles, inland vs landfalling.
+- ⏳ Work queue (see Next up): best-track edit 🔧 and 0-3 h period 🔧 built; ensembles and inland vs landfalling to do.
 
 ### To Consider
 

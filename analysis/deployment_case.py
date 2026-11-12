@@ -35,7 +35,8 @@ PATH_KEYS = ("grid_json_dir", "grid_plot_dir", "stage4_regrid_dir",
              "grid_stat_dir", "log_dir")
 MASK_KEYS = {"coast_buffer_km", "ne_scale"}
 WOFS_KEYS = {"root", "available", "complete_windows"}
-HAFS_KEYS = {"lookback_h", "min_members", "init_start", "init_end", "models"}
+HAFS_KEYS = {"lookback_h", "min_members", "init_start", "init_end", "models",
+             "include_spinup"}
 GRID_KEYS = {"res_km"}
 DEFAULT_COAST_KM = 150.0
 REGRID_KEYS = {"sources", "method", "width", "vld_thresh", "tolerance_pct",
@@ -44,7 +45,7 @@ PLOT_KEYS = {"panels"}
 GRID_STAT_KEYS = {"thresholds_mm", "widths_km", "wet_thresh_mm", "cov_thresh",
                   "test_end"}
 EYEBALL_KEYS = {"members", "windows", "cycles", "cycle_every_h", "domain",
-                "colorbar_style"}
+                "colorbar_style", "spinup_only"}
 PLOT_DOMAINS = ("wide", "wofs")
 COLORBAR_STYLES = ("true_scale", "standard")
 PLOT_PANELS = ("compare-regrid", "compare-products", "compare-anomaly")
@@ -102,13 +103,16 @@ class EyeballSettings:
     `cycle_every_h` instead keeps the cycles initialized at multiples of that
     many hours (12: the 00Z and 12Z ones) and overrides `cycles`; `members` are
     WoFS member numbers. `domain` is the map extent: `wide` frames the
-    deployment with a margin (default), `wofs` is the deployment grid alone."""
+    deployment with a margin (default), `wofs` is the deployment grid alone.
+    `spinup_only` draws only the HAFS 0-3 h cycles (initialized at the window
+    start) and skips windows that have none."""
     members: tuple = (0, 9)
     windows: int = 3
     cycles: int = 2
     cycle_every_h: Optional[int] = None
     domain: str = "wide"
     colorbar_style: str = "true_scale"
+    spinup_only: bool = False
 
 
 @dataclass
@@ -161,6 +165,7 @@ class DeploymentCase:
     valid_end: Optional[datetime] = None
     hafs_lookback_h: int = 48
     hafs_min_members: int = 8
+    hafs_include_spinup: bool = False   # also regrid/score the 0-3 h cycle
     hafs_init_start: Optional[datetime] = None
     hafs_init_end: Optional[datetime] = None
     hafs_models: dict = field(default_factory=dict)
@@ -378,11 +383,13 @@ class DeploymentCase:
         return self.wofs_root.parent.name
 
 
-def from_yaml(path, res_km=None, sources=None, coast_km=None):
+def from_yaml(path, res_km=None, sources=None, coast_km=None,
+              include_spinup=None):
     """The case in `path`. `res_km` overrides grid.res_km (run.py --res-km),
     `sources` overrides regrid.sources (run.py --sources) and `coast_km`
     overrides masks.coast_buffer_km (run.py --coast-km), so another
-    resolution, obs product or mask buffer needs no edit to the YAML."""
+    resolution, obs product or mask buffer needs no edit to the YAML.
+    `include_spinup` (run.py --include-spinup) overrides hafs.include_spinup."""
     path = Path(path)
     cfg = yaml.safe_load(path.read_text()) or {}
     _unknown(cfg, TOP_KEYS, "case")
@@ -515,7 +522,8 @@ def from_yaml(path, res_km=None, sources=None, coast_km=None):
             members=members, windows=int(eyeball.get("windows", 3)),
             cycles=int(eyeball.get("cycles", 2)),
             cycle_every_h=int(every) if every is not None else None,
-            domain=domain, colorbar_style=style),
+            domain=domain, colorbar_style=style,
+            spinup_only=bool(eyeball.get("spinup_only", False))),
     )
     unknown_fields = set(case.regrid.fields) - set(TRUTH_SOURCES)
     if unknown_fields:
@@ -535,6 +543,7 @@ def from_yaml(path, res_km=None, sources=None, coast_km=None):
             raise ValueError("valid_end must be after valid_start")
         case.hafs_lookback_h = int(hafs.get("lookback_h", 48))
         case.hafs_min_members = int(hafs.get("min_members", 8))
+        case.hafs_include_spinup = bool(hafs.get("include_spinup", False))
         if hafs.get("init_start") is not None:
             case.hafs_init_start = parse_stamp(hafs["init_start"],
                                                "hafs.init_start")
@@ -542,4 +551,6 @@ def from_yaml(path, res_km=None, sources=None, coast_km=None):
             case.hafs_init_end = parse_stamp(hafs["init_end"], "hafs.init_end")
         case.hafs_models = {k: Path(v)
                             for k, v in (hafs.get("models") or {}).items()}
+    if include_spinup is not None:
+        case.hafs_include_spinup = bool(include_spinup)
     return case

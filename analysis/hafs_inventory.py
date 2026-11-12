@@ -85,11 +85,16 @@ def hafs_window_status(init_dt, leads, window):
     return "missing_file"
 
 
-def members_for_window(window_start, inits, lookback_h=LOOKBACK_H):
+def members_for_window(window_start, inits, lookback_h=LOOKBACK_H,
+                       include_spinup=False):
     """Cycles that count as members for a window: initialized at most
-    lookback_h before the window start and strictly before it."""
+    lookback_h before the window start and strictly before it; with
+    `include_spinup`, also the cycle initialized at the window start (its 0-3 h
+    bucket, the spin-up)."""
     lo = window_start - timedelta(hours=lookback_h)
-    return sorted(i for i in inits if lo <= i < window_start)
+    return sorted(i for i in inits
+                  if lo <= i and (i <= window_start if include_spinup
+                                  else i < window_start))
 
 
 def cycle_gaps(inits, cycle_h=CYCLE_H):
@@ -99,9 +104,11 @@ def cycle_gaps(inits, cycle_h=CYCLE_H):
             if b - a > timedelta(hours=cycle_h)]
 
 
-def window_members(window, cycles, lookback_h=LOOKBACK_H):
+def window_members(window, cycles, lookback_h=LOOKBACK_H,
+                   include_spinup=False):
     """(n_members, [init, ...]) usable for a window, from {init: leads}."""
-    usable = [i for i in members_for_window(window.start, cycles, lookback_h)
+    usable = [i for i in members_for_window(window.start, cycles, lookback_h,
+                                            include_spinup)
               if hafs_window_status(i, cycles[i], window) == "complete"]
     return len(usable), usable
 

@@ -217,3 +217,12 @@ def test_the_footnote_gives_a_range_when_models_have_different_window_counts():
     pl.SETTINGS.update(bands=True, max_thresh=None)
     assert "12-39 windows" in pl._windows_note(df, "x")
     assert "12 windows" in pl._windows_note(df.iloc[[0]], "x")
+
+
+def test_spinup_samples_read_the_withspinup_tables():
+    got = pl.spinup_samples(pl.SAMPLE_SETS["matched"])
+    assert got["fixed"][0] == "_matched_fixed-spinup_withspinup"
+    assert got["lead6"][0] == "_matched_leads_withspinup"
+    got = pl.spinup_samples(pl.SAMPLE_SETS["all"])
+    assert got["fixed"][0] == "_withspinup"
+    assert got["allleads"][0] == "_allleads_withspinup"

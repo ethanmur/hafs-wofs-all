@@ -62,15 +62,16 @@ class Manifest:
 # =============================================================================
 
 def expected_cycles(window_start, lookback_h=hi.LOOKBACK_H,
-                    cycle_h=hi.CYCLE_H):
+                    cycle_h=hi.CYCLE_H, include_spinup=False):
     """The cycle times that should be members for a window: every `cycle_h`
     boundary from `lookback_h` before the window start, up to but not
-    including the start (a cycle initialized at the start is spin-up)."""
+    including the start (a cycle initialized at the start is spin-up), unless
+    `include_spinup`, which adds that cycle (its bucket is hours 0-3)."""
     t = (window_start - timedelta(hours=lookback_h)).replace(
         minute=0, second=0, microsecond=0)
     t += timedelta(hours=(-t.hour) % cycle_h)
     out = []
-    while t < window_start:
+    while t < window_start or (include_spinup and t == window_start):
         out.append(t)
         t += timedelta(hours=cycle_h)
     return out
@@ -117,7 +118,8 @@ def hafs_rows(case, cycles, files, windows):
         for config in case.hafs_models:
             have = cycles.get(config, {})
             fmap = files.get(config, {})
-            for init in expected_cycles(w.start, case.hafs_lookback_h):
+            for init in expected_cycles(w.start, case.hafs_lookback_h,
+                                      include_spinup=case.hafs_include_spinup):
                 leads = have.get(init)
                 status = ("no_cycle" if leads is None
                           else hi.hafs_window_status(init, leads, w))

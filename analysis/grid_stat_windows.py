@@ -195,11 +195,13 @@ def choose_test(case, mask):
             continue
         truth = case.obs_window_path(source, w.end)
         wofs = runs_for(case.wofs_regrid_3h_dir, w.end, "wofs", case.res_label)
-        hafs = [(c, *runs_for(case.hafs_regrid_dir_for(c), w.end, c.lower(),
-                              case.res_label)[-1])
-                for c in case.hafs_models
-                if runs_for(case.hafs_regrid_dir_for(c), w.end, c.lower(),
-                            case.res_label)]
+        hafs = []                  # the 0-3 h (spin-up) cycle is not a test run
+        for c in case.hafs_models:
+            runs = [r for r in runs_for(case.hafs_regrid_dir_for(c), w.end,
+                                        c.lower(), case.res_label)
+                    if r[0] < w.start]
+            if runs:
+                hafs.append((c, *runs[-1]))
         if not (truth.exists() and wofs and hafs):
             continue
         field = met_regrid.read_regridded(truth)[2]

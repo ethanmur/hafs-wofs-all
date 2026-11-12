@@ -124,3 +124,10 @@ def test_pooled_total_of_eight_passes_even_with_one_configuration():
     rows = hi.member_rows(archive, wofs)
     assert {r["hafs_status"] for r in rows} == {"ok"}
     assert [r["n_members"] for r in rows] == [8, 0]
+
+
+def test_members_can_include_the_window_start_cycle():
+    ws = datetime(2024, 7, 10, 18)
+    inits = [datetime(2024, 7, 10, 12), datetime(2024, 7, 10, 18)]
+    assert hi.members_for_window(ws, inits) == [datetime(2024, 7, 10, 12)]
+    assert hi.members_for_window(ws, inits, include_spinup=True) == inits

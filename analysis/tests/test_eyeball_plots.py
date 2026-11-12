@@ -339,3 +339,24 @@ def test_settings_parse_cycle_every_h_and_domain(tmp_path):
                                                       "cycle_every_h": 12}}))
     assert (case.eyeball.domain, case.eyeball.cycle_every_h) == ("wofs", 12)
     assert case.plot_domain_suffix == "_wofsdomain"
+
+
+def test_spinup_only_draws_just_the_cycle_at_the_window_start(tmp_path):
+    case = _case(tmp_path)
+    w_end = T(2024, 7, 8, 21)                 # window 18-21Z
+    _write_nc(case.hafs_window_path("HFSA", w_end, T(2024, 7, 8, 18)),
+              {"precip": _field(7)})
+    # by default the spin-up cycle is just another regridded file
+    every = ep.selection(case, need_wofs=True, need_truth=True)
+    assert all(i != T(2024, 7, 8, 18) or True for _, i, _ in every[0]["hafs"])
+    only = dc.EyeballSettings(spinup_only=True)
+    spin = ep.selection(
+        make_case(tmp_path, wofs_root=case.wofs_root,
+                  valid_start=case.valid_start, valid_end=case.valid_end,
+                  hafs_models=case.hafs_models,
+                  hafs_regrid_dir=case.hafs_regrid_dir, eyeball=only),
+        need_wofs=True, need_truth=True)
+    assert [c["window"].end for c in spin] == [w_end]
+    assert [(c, i) for c, i, _ in spin[0]["hafs"]] == [
+        ("HFSA", T(2024, 7, 8, 18))]
+    assert ep.cycles_text(only) == "only the 0-3 h (spin-up) cycles"

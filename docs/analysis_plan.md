@@ -1204,22 +1204,31 @@ under To Consider).
      tracks (thinner, outlined, so the HAFS lines stay readable) and keep the
      final HAFS track-position circles above both, to see how members sit relative
      to the best track.
-  2. **The 0-3 h period for HAFS and WoFS, with a toggle.** WoFS already has it:
-     a WoFS init at the window start has `lead_h` 3 (forecast hours 0-3), and it is
-     in every table and figure now. HAFS does not: D4 requires a cycle to be
-     initialized strictly before the window start, so the cycle at the window start
-     (spin-up) is not regridded or scored. Plan: relax D4 to allow init = window
-     start (cycles at 00/06/12/18Z give windows ending 03/09/15/21Z), re-run
-     `regrid-hafs`, `grid-stat` (resumable: only the new runs) and `parse-stat`;
-     then `--first-bucket include|exclude` in `pool_stats`, `bootstrap_stats` and
-     `plot_stats` drops the `lead_h` 3 rows of every model. Expect WoFS to score
-     best here (data assimilation) and HAFS worst (spin-up). Caveats to settle:
-     the 0-3 h HAFS windows end at 03/09/15/21Z, a different window family from the
-     lead-6 one (00/06/12/18Z), so a lead 3 head-to-head uses other windows and the
-     fixed-window lead curves need a second fixed set (HAFS leads 3, 9 ... 51); and
-     which setting is the default (the earlier decision excluded HAFS 0-3 h as
-     spin-up; `exclude` keeps that for both models, `include` changes today's WoFS
-     figures).
+  2. **The 0-3 h period for HAFS, with a toggle** (built 2026-11-12; run on Orion
+     next). WoFS already has it: a WoFS init at the window start has `lead_h` 3
+     (forecast hours 0-3) and stays in every table and figure. HAFS had it
+     excluded: D4 required a cycle strictly before the window start. Now:
+     - `hafs.include_spinup: true` in a case YAML, or `--include-spinup` on
+       `run.py` (default off), lets a cycle initialized at the window start into
+       the manifest, `regrid-hafs` and so `grid-stat` (which scores whatever is
+       regridded, resumable: only the new files are run, nothing is redone) and
+       `parse-stat`. Cycles at 00/06/12/18Z give windows ending 03/09/15/21Z.
+       Order: `build-manifest`, `regrid-hafs --include-spinup`, `grid-stat`,
+       `parse-stat`.
+     - `--first-bucket exclude|include` in `pool_stats`, `bootstrap_stats` and
+       `plot_stats`; default **exclude** drops the HAFS `lead_h` 3 rows (WoFS
+       lead 3 is kept, as before). `include` writes files ending `_withspinup`.
+     - `--matched fixed-spinup` (needs include): the second fixed set, windows
+       ending 03/09/15/21Z with HAFS leads 3, 9 ... 51 (WoFS 3-6). `plot_stats
+       --first-bucket include` uses it for the fixed lead curves.
+     - Test plots: `plot-eyeball` / `plot-hafs-check` include the spin-up cycle
+       like any other regridded file; `--spinup-only` draws only those cycles.
+       `grid-stat-test` never picks the spin-up cycle.
+     Expect HAFS to score worst at lead 3 (spin-up); the 0-3 h HAFS windows are a
+     different window family from lead 6, so a lead 3 head-to-head uses other
+     windows. Whether to make `include` the default waits on the example plots.
+     Unchecked: that the f003 file carries an `A3` APCP record (a missing one
+     shows as `no_bucket` in the regrid budget CSV).
   3. **WoFS and HAFS ensembles, mean and probability-matched mean (PMM), scored
      like single members.** WoFS is designed as an ensemble, and single members
      understate it. Build, per window: the WoFS ensemble (the 18 members of one

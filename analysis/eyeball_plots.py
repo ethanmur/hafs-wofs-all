@@ -117,6 +117,8 @@ def pick_cycles(runs, settings):
 
 
 def cycles_text(settings):
+    if settings.spinup_only:
+        return "only the 0-3 h (spin-up) cycles"
     if settings.cycle_every_h:
         return f"cycles every {settings.cycle_every_h} h"
     return f"{settings.cycles} cycles"
@@ -142,6 +144,9 @@ def selection(case, need_wofs, need_truth):
     for w in aw.clock_windows(case.valid_start, case.valid_end):
         hafs = {c: runs_for(case.hafs_regrid_dir_for(c), w.end, c.lower(), res)
                 for c in case.hafs_models}
+        if settings.spinup_only:       # only the 0-3 h cycle counts as a file
+            hafs = {c: [r for r in runs if r[0] == w.start]
+                    for c, runs in hafs.items()}
         if not any(hafs.values()):
             continue
         wofs = runs_for(case.wofs_regrid_3h_dir, w.end, "wofs", res)
@@ -153,8 +158,12 @@ def selection(case, need_wofs, need_truth):
         found.append((w, wofs, hafs))
     out = []
     for w, wofs, hafs in pick_evenly(found, settings.windows):
-        picks = [(c, init, path) for c, runs in hafs.items()
-                 for init, path in pick_cycles(runs, settings)]
+        if settings.spinup_only:       # the cycle initialized at the window start
+            picks = [(c, init, path) for c, runs in hafs.items()
+                     for init, path in runs if init == w.start]
+        else:
+            picks = [(c, init, path) for c, runs in hafs.items()
+                     for init, path in pick_cycles(runs, settings)]
         out.append({"window": w, "wofs": wofs[-1] if wofs else None,
                     "hafs": picks})
     return out

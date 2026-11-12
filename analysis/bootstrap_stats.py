@@ -210,16 +210,17 @@ def leave_one_storm_out(df, line_type):
 
 def bootstrap_all(csv_dir, out_dir=None, tag="_3km", levels=("all",),
                   mode=None, n_boot=1000, seed=0, loo=True, pool_leads=False,
-                  log=print, exclude=None):
+                  log=print, exclude=None, first_bucket="exclude"):
     """{name: path} of the files written."""
     out_dir = Path(out_dir) if out_dir else Path(csv_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     exclude = set(ps.EXCLUDED_CASES if exclude is None else exclude)
+    ps.check_first_bucket(mode, first_bucket)
     if exclude:
         log("Excluded : " + ", ".join(sorted(exclude)))
     written = {}
     for lt in ps.LINE_TYPES:
-        df = ps.load(csv_dir, lt, tag, exclude)
+        df = ps.load(csv_dir, lt, tag, exclude, first_bucket)
         if df is None:
             log(f"{lt:<7} no stat_{lt}_*{tag}.csv in {csv_dir}; skipped")
             continue
@@ -237,20 +238,20 @@ def bootstrap_all(csv_dir, out_dir=None, tag="_3km", levels=("all",),
             est, diff = bootstrap(df, lt, level, n_boot, seed,
                                   diffs=bool(mode))
             path = ps.out_path(out_dir, level, lt, tag, mode, "boot",
-                               pool_leads, exclude)
+                               pool_leads, exclude, first_bucket)
             est.to_csv(path, index=False, float_format="%.6g")
             written[("boot", level, lt)] = path
             log(f"        {level:<5} {len(est):>7,} rows -> {path.name}")
             if diff is not None:
                 path = ps.out_path(out_dir, level, lt, tag, mode, "bootdiff",
-                                   pool_leads, exclude)
+                                   pool_leads, exclude, first_bucket)
                 diff.to_csv(path, index=False, float_format="%.6g")
                 written[("bootdiff", level, lt)] = path
                 log(f"        {level:<5} {len(diff):>7,} rows -> {path.name}")
         if loo:
             table = leave_one_storm_out(df, lt)
             path = (Path(out_dir) / f"loo_storm_{lt}{tag}"
-                    f"{ps.name_suffix(mode, pool_leads, exclude)}.csv")
+                    f"{ps.name_suffix(mode, pool_leads, exclude, first_bucket)}.csv")
             table.to_csv(path, index=False, float_format="%.6g")
             written[("loo", "storm", lt)] = path
             log(f"        loo   {len(table):>7,} rows -> {path.name}")
@@ -271,7 +272,7 @@ def main(argv=None):
     ap.add_argument("--tag", default="_3km")
     ap.add_argument("--level", nargs="+", choices=list(ps.LEVELS),
                     default=["all"])
-    ap.add_argument("--matched", choices=("windows", "leads", "fixed"))
+    ap.add_argument("--matched", choices=("windows", "leads", "fixed", "fixed-spinup"))
     ap.add_argument("--pool-leads", action="store_true",
                     help="sum all leads together (lead_h becomes 'all')")
     ap.add_argument("--n-boot", type=int, default=1000)
@@ -284,7 +285,8 @@ def main(argv=None):
         ap.error("--n-boot below 100 is too few for 95 % percentiles")
     bootstrap_all(a.csv_dir, a.out_dir, a.tag, tuple(a.level), a.matched,
                   a.n_boot, a.seed, not a.no_loo, a.pool_leads,
-                  exclude=ps.excluded_from_args(a))
+                  exclude=ps.excluded_from_args(a),
+                  first_bucket=a.first_bucket)
 
 
 if __name__ == "__main__":

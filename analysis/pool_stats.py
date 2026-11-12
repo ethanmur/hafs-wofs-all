@@ -65,6 +65,8 @@ EXTRA_KEYS = {"ctc": ["thresh_mm"],
               "sl1l2": ["cell_set", "wet_thresh_mm"],
               "nbrcnt": ["thresh_mm", "nbr_cells", "nbr_width_km"]}
 LINE_TYPES = tuple(EXTRA_KEYS)
+FIRST_BUCKET = ("exclude", "include")
+HAFS_SOURCES = ("hfsa", "hfsb")
 CASE_RE = r"\d{4}_\d{2}[a-z]_[a-z]+_\d{8}_d\d+"
 
 # Cases left out of every pooled table unless asked back (--include-excluded).
@@ -110,16 +112,23 @@ def csv_files(csv_dir, line_type, tag):
                   if pat.match(p.name))
 
 
-def load(csv_dir, line_type, tag, exclude=None):
+def load(csv_dir, line_type, tag, exclude=None, first_bucket="exclude"):
     """The per-case tables of a line type, minus the excluded cases (default:
-    EXCLUDED_CASES; pass () to keep every case)."""
+    EXCLUDED_CASES; pass () to keep every case). `first_bucket` "exclude" drops
+    the HAFS 0-3 h rows (a cycle initialized at the window start, lead_h 3: the
+    spin-up); "include" keeps them. WoFS lead 3 is always kept."""
     files = csv_files(csv_dir, line_type, tag)
     if not files:
         return None
     df = pd.concat([pd.read_csv(f, dtype={"member": str}) for f in files],
                    ignore_index=True)
     exclude = set(EXCLUDED_CASES if exclude is None else exclude)
-    df = df[~df["case"].isin(exclude)].reset_index(drop=True)
+    df = df[~df["case"].isin(exclude)]
+    if first_bucket not in FIRST_BUCKET:
+        raise ValueError(f"first_bucket must be one of {FIRST_BUCKET}")
+    if first_bucket == "exclude":
+        df = df[~(df["source"].isin(HAFS_SOURCES) & (df["lead_h"] == 3))]
+    df = df.reset_index(drop=True)
     if df.empty:
         return None
     # blank member and wet_thresh_mm are legitimate (HAFS; all cells), so keep
@@ -139,21 +148,28 @@ FIXED_LEADS = {"wofs": (3, 4, 5, 6), "hfsa": tuple(range(6, 49, 6)),
                "hfsb": tuple(range(6, 49, 6))}
 
 
-def fixed_windows(df):
-    """Rows at FIXED_LEADS, only for the windows where every source in the
-    table has every one of its fixed leads."""
+# Mode "fixed-spinup": the other window family (ending 03/09/15/21Z), whose HAFS
+# leads are 3 (the 0-3 h spin-up bucket), 9 ... 51. Needs --first-bucket include.
+FIXED_LEADS_SPINUP = {"wofs": (3, 4, 5, 6), "hfsa": tuple(range(3, 52, 6)),
+                      "hfsb": tuple(range(3, 52, 6))}
+
+
+def fixed_windows(df, leads=None):
+    """Rows at FIXED_LEADS (or `leads`), only for the windows where every source
+    in the table has every one of its fixed leads."""
+    FIXED = leads or FIXED_LEADS
     present = list(df["source"].unique())
-    unknown = [s for s in present if s not in FIXED_LEADS]
+    unknown = [s for s in present if s not in FIXED]
     if unknown:
         raise ValueError(f"no fixed leads defined for source(s) {unknown}")
     mask = np.zeros(len(df), bool)
     for s in present:
-        mask |= ((df["source"] == s) & df["lead_h"].isin(FIXED_LEADS[s])
+        mask |= ((df["source"] == s) & df["lead_h"].isin(FIXED[s])
                  ).to_numpy()
     d = df[mask]
     have = (d.groupby(["case", "valid_end", "source"])["lead_h"].nunique()
             .unstack("source"))
-    need = pd.Series({s: len(FIXED_LEADS[s]) for s in present})
+    need = pd.Series({s: len(FIXED[s]) for s in present})
     ok = have.reindex(columns=present).eq(need).all(axis=1)
     idx = pd.MultiIndex.from_frame(d[["case", "valid_end"]])
     return d[idx.isin(ok[ok].index)]
@@ -165,6 +181,8 @@ def matched(df, mode):
     runs for; mode "fixed" keeps the windows with every FIXED_LEADS lead."""
     if mode == "fixed":
         return fixed_windows(df)
+    if mode == "fixed-spinup":
+        return fixed_windows(df, FIXED_LEADS_SPINUP)
     keys = ["case", "valid_end"] + (["lead_h"] if mode == "leads" else [])
     have = df.groupby(keys)["source"].nunique()
     keep = have[have == df["source"].nunique()].index
@@ -294,32 +312,38 @@ def pool(df, line_type, level):
 # Command line
 # =============================================================================
 
-def name_suffix(mode=None, pool_leads=False, excluded=None):
+def name_suffix(mode=None, pool_leads=False, excluded=None,
+                first_bucket="exclude"):
     """The file-name ending of a sample: _matched_<mode>, then _allleads, then
-    _withexcluded / _customexcl when the excluded cases are not the default."""
+    _withexcluded / _customexcl when the excluded cases are not the default,
+    then _withspinup when the HAFS 0-3 h bucket is included."""
     return ((f"_matched_{mode}" if mode else "")
             + ("_allleads" if pool_leads else "")
-            + ("" if excluded is None else excluded_tag(excluded)))
+            + ("" if excluded is None else excluded_tag(excluded))
+            + ("_withspinup" if first_bucket == "include" else ""))
 
 
 def out_path(out_dir, level, line_type, tag, mode=None, prefix="pooled",
-             pool_leads=False, excluded=None):
+             pool_leads=False, excluded=None, first_bucket="exclude"):
     return Path(out_dir) / (f"{prefix}_{level}_{line_type}{tag}"
-                            f"{name_suffix(mode, pool_leads, excluded)}.csv")
+                            f"{name_suffix(mode, pool_leads, excluded, first_bucket)}.csv")
 
 
 def pool_all(csv_dir, out_dir=None, tag="_3km", levels=tuple(LEVELS),
-             mode=None, pool_leads=False, log=print, exclude=None):
+             mode=None, pool_leads=False, log=print, exclude=None,
+             first_bucket="exclude"):
     """{(level, line type): path}. Missing line types are skipped with a note,
     and an empty directory is an error."""
     out_dir = Path(out_dir) if out_dir else Path(csv_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     exclude = set(EXCLUDED_CASES if exclude is None else exclude)
+    check_first_bucket(mode, first_bucket)
     if exclude:
         log("Excluded : " + ", ".join(sorted(exclude)))
+    log(f"HAFS 0-3 h bucket: {first_bucket}d")
     written = {}
     for lt in LINE_TYPES:
-        df = load(csv_dir, lt, tag, exclude)
+        df = load(csv_dir, lt, tag, exclude, first_bucket)
         if df is None:
             log(f"{lt:<7} no stat_{lt}_*{tag}.csv in {csv_dir}; skipped")
             continue
@@ -334,7 +358,8 @@ def pool_all(csv_dir, out_dir=None, tag="_3km", levels=tuple(LEVELS),
         for level in levels:
             table = pool(df, lt, level)
             path = out_path(out_dir, level, lt, tag, mode,
-                            pool_leads=pool_leads, excluded=exclude)
+                            pool_leads=pool_leads, excluded=exclude,
+                            first_bucket=first_bucket)
             table.to_csv(path, index=False, float_format="%.6g")
             written[(level, lt)] = path
             log(f"{lt:<7} {level:<5} {len(table):>7,} rows -> {path.name}")
@@ -344,7 +369,19 @@ def pool_all(csv_dir, out_dir=None, tag="_3km", levels=tuple(LEVELS),
     return written
 
 
+def check_first_bucket(mode, first_bucket):
+    if first_bucket not in FIRST_BUCKET:
+        raise SystemExit(f"--first-bucket must be one of {FIRST_BUCKET}")
+    if mode == "fixed-spinup" and first_bucket != "include":
+        raise SystemExit("--matched fixed-spinup needs --first-bucket include "
+                         "(its HAFS lead 3 is the 0-3 h bucket)")
+
+
 def add_exclude_args(ap):
+    ap.add_argument("--first-bucket", choices=FIRST_BUCKET, default="exclude",
+                    help="HAFS 0-3 h spin-up bucket (cycle initialized at the "
+                         "window start): exclude (default) or include (files "
+                         "gain _withspinup)")
     ap.add_argument("--exclude-case", nargs="+", default=[], metavar="CASE",
                     help="also leave these case slugs out (default list: "
                          + ", ".join(EXCLUDED_CASES) + ")")
@@ -367,7 +404,7 @@ def main(argv=None):
                          "_3km_coast50km, or '' for 6 km")
     ap.add_argument("--level", nargs="+", choices=list(LEVELS),
                     default=list(LEVELS))
-    ap.add_argument("--matched", choices=("windows", "leads", "fixed"),
+    ap.add_argument("--matched", choices=("windows", "leads", "fixed", "fixed-spinup"),
                     help="pool only the windows, or the (window, lead) "
                          "pairs, every source has runs for; fixed: the "
                          "windows that have every lead of FIXED_LEADS")
@@ -376,7 +413,8 @@ def main(argv=None):
     add_exclude_args(ap)
     a = ap.parse_args(argv)
     pool_all(a.csv_dir, a.out_dir, a.tag, tuple(a.level), a.matched,
-             a.pool_leads, exclude=excluded_from_args(a))
+             a.pool_leads, exclude=excluded_from_args(a),
+             first_bucket=a.first_bucket)
 
 
 if __name__ == "__main__":

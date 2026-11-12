@@ -3,6 +3,7 @@
     python analysis/run.py <case.yaml> <command> [--res-km N]
                                                [--sources stage4 mrms]
                                                [--coast-km N]
+                                               [--include-spinup]
 
 Loads a per-deployment case (deployment_case.py) and runs one command:
   build-grid    build this deployment's verification grid: the WoFS domain
@@ -198,8 +199,12 @@ def split_plot_options(argv):
     """(argv without the plot flags, {EyeballSettings field: value}).
     --members 0 3 6 9, --windows N, --cycles N, --cycle-every-h N and
     --domain wide|wofs override the case's `eyeball:` block for one run of
-    plot-eyeball or plot-hafs-check."""
+    plot-eyeball or plot-hafs-check; --spinup-only draws only the HAFS 0-3 h
+    cycles."""
     argv, found, i = list(argv), {}, 0
+    if "--spinup-only" in argv:
+        argv.remove("--spinup-only")
+        found["spinup_only"] = True
     while i < len(argv):
         flag = argv[i]
         if flag not in PLOT_FLAGS:
@@ -294,6 +299,10 @@ def dispatch(case, command):
 
 
 def main(argv):
+    include_spinup = None
+    if "--include-spinup" in argv:        # regrid and score the 0-3 h HAFS cycle
+        argv = [a for a in argv if a != "--include-spinup"]
+        include_spinup = True
     argv, plot = split_plot_options(argv)
     yaml_path, command, res_km, sources, coast_km = parse_args(argv)
     if plot and command not in ("plot-eyeball", "plot-hafs-check"):
@@ -304,7 +313,8 @@ def main(argv):
     import deployment_case
     import run_log
     case = deployment_case.from_yaml(yaml_path, res_km=res_km, sources=sources,
-                                     coast_km=coast_km)
+                                     coast_km=coast_km,
+                                     include_spinup=include_spinup)
     if plot:
         case = dataclasses.replace(
             case, eyeball=dataclasses.replace(case.eyeball, **plot))

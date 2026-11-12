@@ -132,3 +132,10 @@ def test_plot_flags_reject_bad_values():
 def test_plot_flags_only_apply_to_the_plot_commands(tmp_path):
     with pytest.raises(SystemExit):
         run.main(["c.yaml", "grid-stat", "--domain", "wofs"])
+
+
+def test_spinup_only_is_a_plot_flag():
+    argv, plot = run.split_plot_options(["c.yaml", "plot-hafs-check",
+                                         "--spinup-only", "--windows", "2"])
+    assert argv == ["c.yaml", "plot-hafs-check"]
+    assert plot == {"windows": 2, "spinup_only": True}

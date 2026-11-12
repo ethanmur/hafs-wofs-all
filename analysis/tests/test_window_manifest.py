@@ -238,3 +238,10 @@ def test_unavailable_deployment_gets_no_manifest(tmp_path, capsys):
                      valid_end=None)
     assert wm.build_manifest_case(case) is None
     assert not case.manifest_path.exists()
+
+
+def test_expected_cycles_can_include_the_window_start_cycle():
+    got = wm.expected_cycles(T(2024, 7, 10, 18), include_spinup=True)
+    assert len(got) == 9 and got[-1] == T(2024, 7, 10, 18)
+    # a window that does not start on a cycle gains nothing
+    assert len(wm.expected_cycles(T(2024, 7, 10, 21), include_spinup=True)) == 8
