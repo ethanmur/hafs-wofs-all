@@ -1113,6 +1113,36 @@ Colorblind-safe palettes throughout (Okabe-Ito; no red/green pairings).
     everything plot).
   - Figures go to `figures/stats-categorical-continuous/`, named
     `<kind>_<score or model/threshold>_<sample>_3km.png`.
+  - Flags: `--no-bands` (no bootstrap bands, crosses or error bars),
+    `--max-thresh 75` (default; 150 for all), and per-model lead figures share one
+    y range per score (largest values across the models) so they compare.
+  - **All-available-data set** (`--sample-set all`; `both` is the default):
+    the same figures from every window of each model, not matched, with
+    `_allwindows` in the names. It is not a fair comparison (the models see
+    different windows) but is the whole sample, which the inland / landfalling
+    split needs. Tables: `boot_all_*_3km.csv` and `boot_all_*_3km_allleads.csv`
+    (`bootstrap_stats.py --pool-leads` with no `--matched`). After the Beryl
+    exclusion the 10 cases have 47 windows (HAFS up to 24 per lead, WoFS up to
+    39), against 12 / 11 / 43 windows in the matched samples.
+  - **Samples** (windows, not domains): the lead-6 sample is 12 windows in 7
+    domains (Hilary 0819 d1 x2, 0820 d1 x1, 0820 d2 x1; Beryl 0708 d1 x2, 0708 d2
+    x1; Helene 0926 d1 x2; Milton x3), with 12 HFSA, 12 HFSB and 216 WoFS runs.
+    The fixed lead-curve sample is the same minus Milton 2024-10-10 12Z (11
+    windows, 88 / 88 / 792 runs): there WoFS has only lead 6, not leads 3-5, so
+    that window lacks the full lead set. The all-leads sample is 44 windows
+    (315 / 315 / 2,394 runs). Lead 6 compares forecasts 3-6 h into the run for all
+    three models; all leads sums every lead (HAFS 6-51 h, WoFS 3-6 h), so it
+    mixes lead ranges. Windows missing a model are dropped so every model is
+    scored on the same windows.
+
+- **Beryl 20240710_d1 excluded from all pooled tables** (done 2026-11-12). Its
+  domain is centered at 41.6N 92.1W (Iowa) and is not Beryl-related by the
+  best-track distances and tracks, and it has a single HAFS window. `pool_stats`
+  and `bootstrap_stats` drop it by default (`EXCLUDED_CASES`); `--include-excluded`
+  brings it back (files end `_withexcluded`) and `--exclude-case` adds more; the
+  per-case `stat_*.csv` are untouched. The five Beryl domains are centered over
+  Texas (0708 d1), Missouri (0708 d2), Kentucky (0709 d1), Iowa (0710 d1) and
+  eastern Pennsylvania (0710 d2, kept: it spans PA, southern NY and NJ).
 
 ### To Complete
 
@@ -1158,16 +1188,68 @@ under To Consider).
 - **HAFS track plot and best-track location plot** (built; to be checked on the
   real domains, then moved to Completed). Both per domain and per 3 h window, one
   flat folder `figures/storm-tracks/`:
-  - `plot-hafs-tracks`: the NHC best track beneath the HAFS forecast tracks of
-    every cycle in that window's sample (HFSA blues, HFSB oranges, darker =
+  - `plot-hafs-tracks`: the NHC best track drawn over (thinner, white-outlined) the
+    HAFS forecast tracks of every cycle in that window's sample (HFSA blues, HFSB oranges, darker =
     shorter lead), each drawn from its initialization to the window end only,
     from the storm's a-deck (`python analysis/fetch_bdecks.py --adeck`; HAFS-A
     and HAFS-B are techs `HFSA` and `HFSB`; 6-hourly fixes, interpolated linearly
     to the window end). Landfalling storms show cycles back to 48 h before;
-    inland cases fewer, still drawn. Shows track errors.
+    inland cases fewer, still drawn. Final-position circles sit above both. Shows track errors.
   - `plot-tc-location`: the `storm-location` table made visual: best track, WoFS
     domain outline and center, the nearest-in-time fix, the final landfall, and
     the distances from the domain center to each; out-of-bounds windows say so.
+
+- **Work queue** (one at a time, in this order; recorded 2026-11-12):
+  1. **`plot-hafs-tracks`: best track on top** (done 2026-11-12, to check on real a-decks). Draw the best track above the HAFS
+     tracks (thinner, outlined, so the HAFS lines stay readable) and keep the
+     final HAFS track-position circles above both, to see how members sit relative
+     to the best track.
+  2. **The 0-3 h period for HAFS and WoFS, with a toggle.** WoFS already has it:
+     a WoFS init at the window start has `lead_h` 3 (forecast hours 0-3), and it is
+     in every table and figure now. HAFS does not: D4 requires a cycle to be
+     initialized strictly before the window start, so the cycle at the window start
+     (spin-up) is not regridded or scored. Plan: relax D4 to allow init = window
+     start (cycles at 00/06/12/18Z give windows ending 03/09/15/21Z), re-run
+     `regrid-hafs`, `grid-stat` (resumable: only the new runs) and `parse-stat`;
+     then `--first-bucket include|exclude` in `pool_stats`, `bootstrap_stats` and
+     `plot_stats` drops the `lead_h` 3 rows of every model. Expect WoFS to score
+     best here (data assimilation) and HAFS worst (spin-up). Caveats to settle:
+     the 0-3 h HAFS windows end at 03/09/15/21Z, a different window family from the
+     lead-6 one (00/06/12/18Z), so a lead 3 head-to-head uses other windows and the
+     fixed-window lead curves need a second fixed set (HAFS leads 3, 9 ... 51); and
+     which setting is the default (the earlier decision excluded HAFS 0-3 h as
+     spin-up; `exclude` keeps that for both models, `include` changes today's WoFS
+     figures).
+  3. **WoFS and HAFS ensembles, mean and probability-matched mean (PMM), scored
+     like single members.** WoFS is designed as an ensemble, and single members
+     understate it. Build, per window: the WoFS ensemble (the 18 members of one
+     init); HAFS lagged ensembles from the cycles in the window's sample, HFSA
+     only, HFSB only, and all HAFS (HFSA + HFSB); for each, the ensemble mean and
+     the PMM (Ebert 2001: sort the pooled values of all members, take the quantile
+     values and assign them by the rank of the ensemble-mean field). Write each as
+     a MET-readable 3 h field on the verification grid, run `grid_stat` on it with
+     the same configuration as a single member (`MODEL` tags such as
+     `wofs_mean_i<init>`, `hfsa_pmm_w<end>`), then `parse-stat` (extend its tag
+     parser), pool, bootstrap and plot with the same statistics and paired
+     differences against the single members. A lagged HAFS ensemble mixes leads
+     (6-48 h), so it is scored per window with an "ensemble" label, not per lead;
+     variants such as only the shortest-lead cycles are possible later. Replaces
+     G1 and G2's deterministic part; probabilistic scores (`ensemble_stat`)
+     remain in Phase G.
+  4. **Inland vs landfalling verification** (added 2026-11-12). You go through the
+     `storm-location` tables (distance from the domain center to landfall, hours
+     from landfall, distance to the TC center) by hand and decide which domains,
+     or domain-windows, count as landfalling and which as inland, and enter that
+     in a small classification table (`case`, `window_end` or case-level, `class`).
+     A `class` level in `pool_stats`, `bootstrap_stats` and `plot_stats` then
+     repeats all the statistics for each class. This partitions the sample again,
+     so the all-available-data figures (`--sample-set all`) are the main view and
+     the matched samples will be small. Open choices for you: per domain or per
+     window (the distance changes as the storm moves; per window with hours from
+     landfall is the finer option), and the cutoffs.
+  *Recommended order:* 1, then 2, then 3, then 4 (4 waits on your classification).
+  Item 1 is small and independent; 2 changes which HAFS cycles are scored, so it
+  comes before building ensembles from them; 3 is the largest.
 
 ### To Consider
 
@@ -1251,8 +1333,11 @@ The earlier plan, kept as it was:
 ## Phase G — Later analyses (design when Phase E is stable)
 
 - **G1.** Probability-matched mean of WoFS members; verify it as a field.
+  (Queued in Phase F, To Complete, item 3.)
 - **G2.** WoFS ensemble and lagged HAFS ensemble (several cycles of one
   configuration, valid at the same window); `gen_ens_prod`, `ensemble_stat`.
+  The deterministic part (ensemble mean and PMM scored like members) is queued
+  in Phase F, To Complete, item 3; probabilistic scores stay here.
 - **G3.** Storm-location stratification: moved to Phase F, *To Complete*.
 - **G4.** Stage IV sensitivity: repeat E on `truth_source: stage4`.
 - **G5.** Mixing HAFS-A and HAFS-B as an explicit experiment.

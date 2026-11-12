@@ -3,15 +3,22 @@
     python analysis/plot_stats.py --pooled-dir data/grid-stat/csvs_pooled
         --fig-dir figures/stats-categorical-continuous [--tag _3km]
         [--only lead thresh perf] [--dpi 150] [--no-bands] [--max-thresh 75]
+        [--sample-set matched|all|both]
 
 Reads the bootstrap tables bootstrap_stats.py wrote and draws one figure per
 score and partition, never everything at once. Plain matplotlib: runs on a
 laptop or on Orion, no MET and no map libraries.
 
-Inputs (tag _3km), from bootstrap_stats.py --level all:
+Inputs (tag _3km), from bootstrap_stats.py --level all. Sample set "matched"
+(the models on the same windows, the fair comparison):
     boot_all_{ctc,sl1l2}_3km_matched_fixed.csv            lead curves
     boot_all_{ctc,sl1l2}_3km_matched_leads.csv            lead 6 h, head to head
     boot_all_{ctc,sl1l2}_3km_matched_windows_allleads.csv all leads summed
+Sample set "all" (every available window of each model; the models see different
+windows, so it is not a fair comparison but shows the whole sample; figure names
+gain _allwindows):
+    boot_all_{ctc,sl1l2}_3km.csv                          lead curves, lead 6 h
+    boot_all_{ctc,sl1l2}_3km_allleads.csv                 all leads summed
 
 Scores: ETS, CSI, frequency bias, POD, success ratio (1 - FAR) and RMSE, each
 with its 95 % window-bootstrap band.
@@ -62,12 +69,23 @@ SCORES = {                                  # key: (axis label, table)
     "fbias": ("Frequency bias", "ctc"), "pod": ("POD", "ctc"),
     "sr": ("Success ratio (1 - FAR)", "ctc"),
 }
-SAMPLES = {                       # key: (file ending, description)
-    "fixed": ("_matched_fixed", "fixed windows"),
-    "lead6": ("_matched_leads", "lead 6 h, same windows"),
-    "allleads": ("_matched_windows_allleads", "all leads summed, matched "
-                 "windows"),
+# key: (table file ending, description). "matched" compares the models on the
+# same windows (fair); "all" uses every available window of each model, so the
+# models see different windows (not a fair comparison, but the whole sample).
+SAMPLE_SETS = {
+    "matched": {
+        "fixed": ("_matched_fixed", "fixed windows"),
+        "lead6": ("_matched_leads", "lead 6 h, same windows"),
+        "allleads": ("_matched_windows_allleads", "all leads summed, matched "
+                     "windows"),
+    },
+    "all": {
+        "fixed": ("", "all available windows"),
+        "lead6": ("", "lead 6 h, all available windows"),
+        "allleads": ("_allleads", "all leads summed, all available windows"),
+    },
 }
+SAMPLES = dict(SAMPLE_SETS["matched"])       # the set in use; make_all sets it
 
 
 # =============================================================================
@@ -113,7 +131,12 @@ def _fmt_t(t):
 
 
 def _windows_note(df, what):
-    n = int(df["n_windows"].max())
+    """Footnote: the sample and how many windows (a range when models or leads
+    differ), whether bands are drawn, and that WoFS pools its members."""
+    d = df[df["obs_events"] >= MIN_EVENTS] if "obs_events" in df else df
+    d = d if len(d) else df
+    lo, hi = int(d["n_windows"].min()), int(d["n_windows"].max())
+    n = f"{lo}" if lo == hi else f"{lo}-{hi}"
     band = "; 95 % window-bootstrap band" if SETTINGS["bands"] else ""
     return f"{what}; {n} windows{band}; WoFS pools its members"
 
@@ -462,14 +485,21 @@ def plot_all_performance(ctc, sample, fig_dir, tag, dpi):
 # =============================================================================
 
 def make_all(pooled_dir, fig_dir, tag="_3km", only=("lead", "thresh", "perf"),
-             dpi=150, log=print, bands=True, max_thresh=None):
+             dpi=150, log=print, bands=True, max_thresh=None,
+             sample_set="matched"):
     """[Path] of every figure written. `bands` draws the bootstrap bands and
-    crosses; `max_thresh` drops thresholds above it (mm)."""
+    crosses; `max_thresh` drops thresholds above it (mm); `sample_set` is
+    "matched" (same windows for every model) or "all" (every available window;
+    figure names gain _allwindows)."""
     SETTINGS["bands"], SETTINGS["max_thresh"] = bands, max_thresh
+    SAMPLES.clear()
+    SAMPLES.update(SAMPLE_SETS[sample_set])
     tables = load(pooled_dir, tag)
     if not tables:
         raise SystemExit(f"plot_stats: no boot_all_*{tag}*.csv tables in "
                          f"{pooled_dir}; run bootstrap_stats.py first.")
+    # from here `tag` only names the figures
+    tag = ("_allwindows" if sample_set == "all" else "") + tag
     written = []
 
     def note(what, paths):
@@ -494,7 +524,8 @@ def make_all(pooled_dir, fig_dir, tag="_3km", only=("lead", "thresh", "perf"),
                         fig_dir, f"lead_{score}_thresh-{_fmt_t(t)}mm", tag))
             note("lead curves (categorical)", paths)
         else:
-            log("lead curves: boot_all_ctc*_matched_fixed.csv missing; skipped")
+            log(f"lead curves: boot_all_ctc{SAMPLES['fixed'][0]}.csv missing; "
+                "skipped")
         sl = tables.get(("fixed", "sl1l2"))
         if sl is not None:
             note("lead curves (RMSE)", plot_rmse_lead(sl, fig_dir, tag, dpi))
@@ -538,9 +569,17 @@ def main(argv=None):
     ap.add_argument("--max-thresh", type=float, default=75.0,
                     help="highest 3 h threshold (mm) drawn; default 75, use "
                          "150 for all")
+    ap.add_argument("--sample-set", choices=("matched", "all", "both"),
+                    default="both",
+                    help="matched: models on the same windows (fair); all: "
+                         "every available window of each model (names gain "
+                         "_allwindows); default both")
     a = ap.parse_args(argv)
-    make_all(a.pooled_dir, a.fig_dir, a.tag, tuple(a.only), a.dpi,
-             bands=not a.no_bands, max_thresh=a.max_thresh)
+    sets = ("matched", "all") if a.sample_set == "both" else (a.sample_set,)
+    for s in sets:
+        print(f"--- sample set: {s}")
+        make_all(a.pooled_dir, a.fig_dir, a.tag, tuple(a.only), a.dpi,
+                 bands=not a.no_bands, max_thresh=a.max_thresh, sample_set=s)
 
 
 if __name__ == "__main__":

@@ -3,8 +3,9 @@
     python analysis/run.py storms/<case>.yaml plot-hafs-tracks
     python analysis/run.py storms/<case>.yaml plot-tc-location
 
-plot-hafs-tracks   The NHC best track under the HAFS forecast tracks of every
-                   cycle in that window's sample (HFSA blues, HFSB oranges,
+plot-hafs-tracks   The NHC best track drawn over the HAFS forecast tracks of every
+                   cycle in that window's sample, with the final-position circles
+                   above both (HFSA blues, HFSB oranges,
                    darker = shorter lead), each drawn from its initialization to
                    the window end only. The tracks come from the storm's a-deck
                    (`fetch_bdecks.py --adeck`), interpolated to the window end.
@@ -129,23 +130,24 @@ def _map_axes(extent, title, subtitle):
     return fig, ax
 
 
-def _draw_best_track(ax, track, end):
-    """The best track: bold up to `end`, thin beyond it for context."""
+def _draw_best_track(ax, track, end, z=3, lw=3.2):
+    """The best track: bold up to `end`, thin beyond it for context. `z` is the
+    zorder of its line (its fixes are z + 1)."""
     upto, _ = adeck.track_to(track, end)     # to the window end, interpolated
     after = [(t, la, lo) for t, la, lo, _ in track if t >= end]
     if upto and after:
         ax.plot([upto[-1][2]] + [p[2] for p in after],
                 [upto[-1][1]] + [p[1] for p in after], color="#888888",
-                lw=1.0, ls=":", transform=ccrs.PlateCarree(), zorder=2)
+                lw=1.0, ls=":", transform=ccrs.PlateCarree(), zorder=z - 1)
     fixes = [p for p in upto if p[0] != end or any(
         f[0] == end for f in track)]
     ax.plot([p[2] for p in upto], [p[1] for p in upto], color=BEST_COLOR,
-            lw=3.2, solid_capstyle="round", transform=ccrs.PlateCarree(),
-            zorder=3, path_effects=[pe.Stroke(linewidth=5, foreground="white"),
+            lw=lw, solid_capstyle="round", transform=ccrs.PlateCarree(),
+            zorder=z, path_effects=[pe.Stroke(linewidth=lw + 1.8, foreground="white"),
                                     pe.Normal()])
     ax.plot([p[2] for p in fixes], [p[1] for p in fixes], ls="none",
             marker="o", ms=3.5, color=BEST_COLOR,
-            transform=ccrs.PlateCarree(), zorder=4)
+            transform=ccrs.PlateCarree(), zorder=z + 1)
 
 
 def _draw_domain(ax, olat, olon, center):
@@ -177,8 +179,8 @@ def _landfall_marker(ax, ref):
 
 def plot_window_hafs_tracks(case, window, track, tracks, cycles, olat, olon,
                             center, landfall, dpi=130, out_dir=None):
-    """One figure: best track beneath the HAFS tracks of `cycles`
-    ({config: [init]}) to the window end. Returns (path, n drawn, n missing)."""
+    """One figure: the best track above the HAFS tracks of `cycles`
+    ({config: [init]}) to the window end, the final-position circles above both. Returns (path, n drawn, n missing)."""
     end = window.end
     drawn, missing, pts, handles = {}, 0, [], []
     lines = []
@@ -205,15 +207,16 @@ def plot_window_hafs_tracks(case, window, track, tracks, cycles, olat, olon,
         f"{case.deployment}, window ending {end:%Y-%m-%d %HZ}",
         "Each HAFS track runs from its initialization to the window end "
         "(a-deck, linear between 6 h fixes); darker = shorter lead.")
-    _draw_best_track(ax, track, end)
     for config, shade, cmap, seg, reached in lines:
         ax.plot([p[2] for p in seg], [p[1] for p in seg], color=cmap(shade),
                 lw=1.4, transform=ccrs.PlateCarree(), zorder=8)
         ax.plot(seg[0][2], seg[0][1], marker="s", ms=3, color=cmap(shade),
                 ls="none", transform=ccrs.PlateCarree(), zorder=8)
+    _draw_best_track(ax, track, end, z=10, lw=2.2)   # over the HAFS lines
+    for config, shade, cmap, seg, reached in lines:
         ax.plot(seg[-1][2], seg[-1][1], marker="o" if reached else "x", ms=6,
                 mfc=cmap(shade), mec="black", mew=0.6, ls="none",
-                transform=ccrs.PlateCarree(), zorder=9)
+                transform=ccrs.PlateCarree(), zorder=13)   # final circles on top
     _draw_domain(ax, olat, olon, center)
     if landfall:
         _landfall_marker(ax, landfall)

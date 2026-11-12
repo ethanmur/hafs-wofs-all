@@ -184,3 +184,36 @@ def test_per_model_figures_share_one_y_range_from_the_largest_values(tables):
     top = max(ctc["ets_hi"].max(), ctc["ets"].max())
     assert lims["ets"][1] == pytest.approx(min(1.0, 1.05 * top))
     assert lims["fbias"][0] == 0.0 and 1.5 <= lims["fbias"][1] <= 4.0
+
+
+def test_the_all_windows_set_reads_the_unmatched_tables_and_names_its_figures(
+        tables, tmp_path):
+    import shutil
+    # the unmatched tables: all leads in one file, and the pooled-lead one
+    shutil.copy(tables / "boot_all_ctc_3km_matched_fixed.csv",
+                tables / "boot_all_ctc_3km.csv")
+    shutil.copy(tables / "boot_all_sl1l2_3km_matched_fixed.csv",
+                tables / "boot_all_sl1l2_3km.csv")
+    shutil.copy(tables / "boot_all_ctc_3km_matched_windows_allleads.csv",
+                tables / "boot_all_ctc_3km_allleads.csv")
+    shutil.copy(tables / "boot_all_sl1l2_3km_matched_windows_allleads.csv",
+                tables / "boot_all_sl1l2_3km_allleads.csv")
+    written = pl.make_all(tables, tmp_path / "f", "_3km", dpi=60,
+                          log=lambda *a: 0, sample_set="all")
+    names = {p.name for p in written}
+    assert "lead_ets_model-hfsa_allwindows_3km.png" in names
+    assert "thresh_ets_lead6_allwindows_3km.png" in names
+    assert "perfdiag_all_allleads_allwindows_3km.png" in names
+    assert all("_allwindows_" in n for n in names)
+    assert pl.SAMPLES["lead6"][1] == "lead 6 h, all available windows"
+    pl.make_all(tables, tmp_path / "g", "_3km", dpi=60, log=lambda *a: 0,
+                only=("perf",))                       # back to the matched set
+    assert pl.SAMPLES["lead6"][1] == "lead 6 h, same windows"
+
+
+def test_the_footnote_gives_a_range_when_models_have_different_window_counts():
+    import pandas as pd
+    df = pd.DataFrame({"n_windows": [12, 39, 24], "obs_events": [5000] * 3})
+    pl.SETTINGS.update(bands=True, max_thresh=None)
+    assert "12-39 windows" in pl._windows_note(df, "x")
+    assert "12 windows" in pl._windows_note(df.iloc[[0]], "x")

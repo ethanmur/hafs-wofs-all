@@ -224,3 +224,50 @@ def test_the_command_writes_a_file_per_level_and_line_type(tmp_path, capsys):
 def test_an_empty_folder_or_wrong_tag_is_an_error(tmp_path):
     with pytest.raises(SystemExit, match="parse-stat"):
         ps.pool_all(tmp_path, tag="_3km")
+
+
+# --- excluded cases ------------------------------------------------------------
+
+def _two_case_dir(tmp_path):
+    """Per-case ctc tables for the excluded Beryl case and for another."""
+    import pandas as pd
+    d = tmp_path / "csvs"
+    d.mkdir()
+    for case, storm in (("2024_02l_beryl_20240710_d1", "Beryl"),
+                        ("2024_14l_milton_20241009_d1", "Milton")):
+        row = _ctc("wofs", 10, 5, 5, 80, case=case)
+        row["storm"] = storm
+        pd.DataFrame([row]).to_csv(d / f"stat_ctc_{case}_3km.csv", index=False)
+    return d
+
+
+def test_the_default_excluded_case_is_left_out_of_every_table(tmp_path):
+    d = _two_case_dir(tmp_path)
+    df = ps.load(d, "ctc", "_3km")
+    assert list(df["case"]) == ["2024_14l_milton_20241009_d1"]
+    assert len(ps.load(d, "ctc", "_3km", exclude=())) == 2
+
+
+def test_excluding_is_named_in_the_files_only_when_not_the_default(tmp_path):
+    d = _two_case_dir(tmp_path)
+    out = tmp_path / "p"
+    base = ps.pool_all(d, out, "_3km", levels=("all",), log=lambda *a: 0)
+    assert base[("all", "ctc")].name == "pooled_all_ctc_3km.csv"
+    both = ps.pool_all(d, out, "_3km", levels=("all",), log=lambda *a: 0,
+                       exclude=ps.resolve_excluded(include_default=True))
+    assert both[("all", "ctc")].name == "pooled_all_ctc_3km_withexcluded.csv"
+    assert pd.read_csv(both[("all", "ctc")]).iloc[0]["fy_oy"] == 20
+    assert pd.read_csv(base[("all", "ctc")]).iloc[0]["fy_oy"] == 10
+    more = ps.resolve_excluded(["2024_14l_milton_20241009_d1"])
+    assert ps.excluded_tag(more) == "_customexcl"
+
+
+def test_the_exclusion_flags(tmp_path, capsys):
+    d = _two_case_dir(tmp_path)
+    ps.main(["--csv-dir", str(d), "--out-dir", str(tmp_path / "o"),
+             "--level", "all", "--include-excluded"])
+    assert (tmp_path / "o" / "pooled_all_ctc_3km_withexcluded.csv").exists()
+    assert "Excluded" not in capsys.readouterr().out
+    ps.main(["--csv-dir", str(d), "--out-dir", str(tmp_path / "o2"),
+             "--level", "all"])
+    assert "Excluded : 2024_02l_beryl_20240710_d1" in capsys.readouterr().out

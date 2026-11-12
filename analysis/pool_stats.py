@@ -28,6 +28,11 @@ ensemble. `n_runs` and `n_windows` say how much went in, and `obs_events` (hits
 + misses) how many cells the threshold has to score: a threshold with few
 events is noise whatever its score.
 
+Cases in EXCLUDED_CASES (Beryl 20240710_d1: centered over Iowa, not
+Beryl-related) are left out of every table; `--include-excluded` brings them
+back (files end _withexcluded) and `--exclude-case` adds more. The per-case
+stat_*.csv are never changed.
+
 `--matched fixed` keeps the windows that have every lead of FIXED_LEADS (HAFS
 6, 12 ... 48 h; WoFS 3-6 h) and only those leads, so a lead curve is drawn from
 the same windows at every lead. `--pool-leads` sums all leads together
@@ -62,6 +67,28 @@ EXTRA_KEYS = {"ctc": ["thresh_mm"],
 LINE_TYPES = tuple(EXTRA_KEYS)
 CASE_RE = r"\d{4}_\d{2}[a-z]_[a-z]+_\d{8}_d\d+"
 
+# Cases left out of every pooled table unless asked back (--include-excluded).
+# The raw per-case tables are untouched.
+EXCLUDED_CASES = {
+    "2024_02l_beryl_20240710_d1":
+        "domain centered over Iowa; not Beryl-related by the best-track "
+        "distances and tracks, and it has a single HAFS window",
+}
+
+
+def resolve_excluded(extra=(), include_default=False):
+    """The set of case slugs to drop: the default list unless
+    `include_default`, plus any `extra`."""
+    out = set() if include_default else set(EXCLUDED_CASES)
+    return out | set(extra)
+
+
+def excluded_tag(excluded):
+    """File-name ending for a non-default exclusion set ("" for the default)."""
+    if set(excluded) == set(EXCLUDED_CASES):
+        return ""
+    return "_withexcluded" if not excluded else "_customexcl"
+
 
 def _div(a, b):
     """a / b, NaN where b is not positive."""
@@ -83,12 +110,18 @@ def csv_files(csv_dir, line_type, tag):
                   if pat.match(p.name))
 
 
-def load(csv_dir, line_type, tag):
+def load(csv_dir, line_type, tag, exclude=None):
+    """The per-case tables of a line type, minus the excluded cases (default:
+    EXCLUDED_CASES; pass () to keep every case)."""
     files = csv_files(csv_dir, line_type, tag)
     if not files:
         return None
     df = pd.concat([pd.read_csv(f, dtype={"member": str}) for f in files],
                    ignore_index=True)
+    exclude = set(EXCLUDED_CASES if exclude is None else exclude)
+    df = df[~df["case"].isin(exclude)].reset_index(drop=True)
+    if df.empty:
+        return None
     # blank member and wet_thresh_mm are legitimate (HAFS; all cells), so keep
     # them out of groupby's NaN dropping by giving the key columns a value
     for col in ("member",):
@@ -261,27 +294,32 @@ def pool(df, line_type, level):
 # Command line
 # =============================================================================
 
-def name_suffix(mode=None, pool_leads=False):
-    """The file-name ending of a sample: _matched_<mode>, then _allleads."""
-    return (f"_matched_{mode}" if mode else "") + (
-        "_allleads" if pool_leads else "")
+def name_suffix(mode=None, pool_leads=False, excluded=None):
+    """The file-name ending of a sample: _matched_<mode>, then _allleads, then
+    _withexcluded / _customexcl when the excluded cases are not the default."""
+    return ((f"_matched_{mode}" if mode else "")
+            + ("_allleads" if pool_leads else "")
+            + ("" if excluded is None else excluded_tag(excluded)))
 
 
 def out_path(out_dir, level, line_type, tag, mode=None, prefix="pooled",
-             pool_leads=False):
+             pool_leads=False, excluded=None):
     return Path(out_dir) / (f"{prefix}_{level}_{line_type}{tag}"
-                            f"{name_suffix(mode, pool_leads)}.csv")
+                            f"{name_suffix(mode, pool_leads, excluded)}.csv")
 
 
 def pool_all(csv_dir, out_dir=None, tag="_3km", levels=tuple(LEVELS),
-             mode=None, pool_leads=False, log=print):
+             mode=None, pool_leads=False, log=print, exclude=None):
     """{(level, line type): path}. Missing line types are skipped with a note,
     and an empty directory is an error."""
     out_dir = Path(out_dir) if out_dir else Path(csv_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    exclude = set(EXCLUDED_CASES if exclude is None else exclude)
+    if exclude:
+        log("Excluded : " + ", ".join(sorted(exclude)))
     written = {}
     for lt in LINE_TYPES:
-        df = load(csv_dir, lt, tag)
+        df = load(csv_dir, lt, tag, exclude)
         if df is None:
             log(f"{lt:<7} no stat_{lt}_*{tag}.csv in {csv_dir}; skipped")
             continue
@@ -296,7 +334,7 @@ def pool_all(csv_dir, out_dir=None, tag="_3km", levels=tuple(LEVELS),
         for level in levels:
             table = pool(df, lt, level)
             path = out_path(out_dir, level, lt, tag, mode,
-                            pool_leads=pool_leads)
+                            pool_leads=pool_leads, excluded=exclude)
             table.to_csv(path, index=False, float_format="%.6g")
             written[(level, lt)] = path
             log(f"{lt:<7} {level:<5} {len(table):>7,} rows -> {path.name}")
@@ -304,6 +342,19 @@ def pool_all(csv_dir, out_dir=None, tag="_3km", levels=tuple(LEVELS),
         raise SystemExit(f"pool_stats: no stat_*{tag}.csv files in {csv_dir}; "
                          "run parse-stat first (or pass the right --tag).")
     return written
+
+
+def add_exclude_args(ap):
+    ap.add_argument("--exclude-case", nargs="+", default=[], metavar="CASE",
+                    help="also leave these case slugs out (default list: "
+                         + ", ".join(EXCLUDED_CASES) + ")")
+    ap.add_argument("--include-excluded", action="store_true",
+                    help="keep the default-excluded cases (files gain "
+                         "_withexcluded)")
+
+
+def excluded_from_args(a):
+    return resolve_excluded(a.exclude_case, a.include_excluded)
 
 
 def main(argv=None):
@@ -322,9 +373,10 @@ def main(argv=None):
                          "windows that have every lead of FIXED_LEADS")
     ap.add_argument("--pool-leads", action="store_true",
                     help="sum all leads together (lead_h becomes 'all')")
+    add_exclude_args(ap)
     a = ap.parse_args(argv)
     pool_all(a.csv_dir, a.out_dir, a.tag, tuple(a.level), a.matched,
-             a.pool_leads)
+             a.pool_leads, exclude=excluded_from_args(a))
 
 
 if __name__ == "__main__":
