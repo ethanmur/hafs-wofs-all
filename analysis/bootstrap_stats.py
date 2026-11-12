@@ -3,7 +3,8 @@ leave-one-storm-out check.
 
     python analysis/bootstrap_stats.py --csv-dir data/grid-stat/csvs
         [--out-dir DIR] [--tag _3km] [--level all storm case]
-        [--matched windows|leads] [--n-boot 1000] [--seed 0] [--no-loo]
+        [--matched windows|leads|fixed] [--pool-leads] [--n-boot 1000]
+        [--seed 0] [--no-loo]
 
 Plain Python (pandas and numpy), like pool_stats.py, which it builds on.
 
@@ -208,7 +209,8 @@ def leave_one_storm_out(df, line_type):
 # =============================================================================
 
 def bootstrap_all(csv_dir, out_dir=None, tag="_3km", levels=("all",),
-                  mode=None, n_boot=1000, seed=0, loo=True, log=print):
+                  mode=None, n_boot=1000, seed=0, loo=True, pool_leads=False,
+                  log=print):
     """{name: path} of the files written."""
     out_dir = Path(out_dir) if out_dir else Path(csv_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -223,25 +225,29 @@ def bootstrap_all(csv_dir, out_dir=None, tag="_3km", levels=("all",),
         if df.empty:
             log(f"{lt:<7} no windows left after --matched {mode}; skipped")
             continue
+        if pool_leads:
+            df = df.assign(lead_h="all")
         n_w = df[["case", "valid_end"]].drop_duplicates().shape[0]
         log(f"{lt:<7} {n_w} windows, {df['storm'].nunique()} storms, "
             f"{n_boot} resamples")
         for level in levels:
             est, diff = bootstrap(df, lt, level, n_boot, seed,
                                   diffs=bool(mode))
-            path = ps.out_path(out_dir, level, lt, tag, mode, "boot")
+            path = ps.out_path(out_dir, level, lt, tag, mode, "boot",
+                               pool_leads)
             est.to_csv(path, index=False, float_format="%.6g")
             written[("boot", level, lt)] = path
             log(f"        {level:<5} {len(est):>7,} rows -> {path.name}")
             if diff is not None:
-                path = ps.out_path(out_dir, level, lt, tag, mode, "bootdiff")
+                path = ps.out_path(out_dir, level, lt, tag, mode, "bootdiff",
+                                   pool_leads)
                 diff.to_csv(path, index=False, float_format="%.6g")
                 written[("bootdiff", level, lt)] = path
                 log(f"        {level:<5} {len(diff):>7,} rows -> {path.name}")
         if loo:
             table = leave_one_storm_out(df, lt)
             path = (Path(out_dir) / f"loo_storm_{lt}{tag}"
-                    f"{'_matched_' + mode if mode else ''}.csv")
+                    f"{ps.name_suffix(mode, pool_leads)}.csv")
             table.to_csv(path, index=False, float_format="%.6g")
             written[("loo", "storm", lt)] = path
             log(f"        loo   {len(table):>7,} rows -> {path.name}")
@@ -262,7 +268,9 @@ def main(argv=None):
     ap.add_argument("--tag", default="_3km")
     ap.add_argument("--level", nargs="+", choices=list(ps.LEVELS),
                     default=["all"])
-    ap.add_argument("--matched", choices=("windows", "leads"))
+    ap.add_argument("--matched", choices=("windows", "leads", "fixed"))
+    ap.add_argument("--pool-leads", action="store_true",
+                    help="sum all leads together (lead_h becomes 'all')")
     ap.add_argument("--n-boot", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-loo", action="store_true",
@@ -271,7 +279,7 @@ def main(argv=None):
     if a.n_boot < 100:
         ap.error("--n-boot below 100 is too few for 95 % percentiles")
     bootstrap_all(a.csv_dir, a.out_dir, a.tag, tuple(a.level), a.matched,
-                  a.n_boot, a.seed, not a.no_loo)
+                  a.n_boot, a.seed, not a.no_loo, a.pool_leads)
 
 
 if __name__ == "__main__":

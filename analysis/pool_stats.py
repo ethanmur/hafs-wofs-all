@@ -28,6 +28,11 @@ ensemble. `n_runs` and `n_windows` say how much went in, and `obs_events` (hits
 + misses) how many cells the threshold has to score: a threshold with few
 events is noise whatever its score.
 
+`--matched fixed` keeps the windows that have every lead of FIXED_LEADS (HAFS
+6, 12 ... 48 h; WoFS 3-6 h) and only those leads, so a lead curve is drawn from
+the same windows at every lead. `--pool-leads` sums all leads together
+(lead_h = all; files end _allleads).
+
 `--matched windows` keeps only the windows (per case) where every source has
 runs, so WoFS and HAFS are pooled over the same windows. `--matched leads` is
 stricter: only (window, lead_h) pairs every source has, the head-to-head sample.
@@ -92,10 +97,41 @@ def load(csv_dir, line_type, tag):
     return df
 
 
+# Mode "fixed": the leads each source must have in a window for the window to
+# count, so a lead curve is drawn from the same windows at every lead. Windows
+# ending 00/06/12/18Z have HAFS leads 6, 12, ... 48 (6-hourly cycles, 48 h
+# lookback) and WoFS leads 3-6 (hourly inits of a 6 h run); the other four daily
+# windows have HAFS leads 9 ... 51 and are not used.
+FIXED_LEADS = {"wofs": (3, 4, 5, 6), "hfsa": tuple(range(6, 49, 6)),
+               "hfsb": tuple(range(6, 49, 6))}
+
+
+def fixed_windows(df):
+    """Rows at FIXED_LEADS, only for the windows where every source in the
+    table has every one of its fixed leads."""
+    present = list(df["source"].unique())
+    unknown = [s for s in present if s not in FIXED_LEADS]
+    if unknown:
+        raise ValueError(f"no fixed leads defined for source(s) {unknown}")
+    mask = np.zeros(len(df), bool)
+    for s in present:
+        mask |= ((df["source"] == s) & df["lead_h"].isin(FIXED_LEADS[s])
+                 ).to_numpy()
+    d = df[mask]
+    have = (d.groupby(["case", "valid_end", "source"])["lead_h"].nunique()
+            .unstack("source"))
+    need = pd.Series({s: len(FIXED_LEADS[s]) for s in present})
+    ok = have.reindex(columns=present).eq(need).all(axis=1)
+    idx = pd.MultiIndex.from_frame(d[["case", "valid_end"]])
+    return d[idx.isin(ok[ok].index)]
+
+
 def matched(df, mode):
     """Rows restricted, per case, to the windows (mode "windows") or the
     (window, lead_h) pairs (mode "leads") that every source in the table has
-    runs for."""
+    runs for; mode "fixed" keeps the windows with every FIXED_LEADS lead."""
+    if mode == "fixed":
+        return fixed_windows(df)
     keys = ["case", "valid_end"] + (["lead_h"] if mode == "leads" else [])
     have = df.groupby(keys)["source"].nunique()
     keep = have[have == df["source"].nunique()].index
@@ -225,13 +261,20 @@ def pool(df, line_type, level):
 # Command line
 # =============================================================================
 
-def out_path(out_dir, level, line_type, tag, mode=None, prefix="pooled"):
+def name_suffix(mode=None, pool_leads=False):
+    """The file-name ending of a sample: _matched_<mode>, then _allleads."""
+    return (f"_matched_{mode}" if mode else "") + (
+        "_allleads" if pool_leads else "")
+
+
+def out_path(out_dir, level, line_type, tag, mode=None, prefix="pooled",
+             pool_leads=False):
     return Path(out_dir) / (f"{prefix}_{level}_{line_type}{tag}"
-                            f"{'_matched_' + mode if mode else ''}.csv")
+                            f"{name_suffix(mode, pool_leads)}.csv")
 
 
 def pool_all(csv_dir, out_dir=None, tag="_3km", levels=tuple(LEVELS),
-             mode=None, log=print):
+             mode=None, pool_leads=False, log=print):
     """{(level, line type): path}. Missing line types are skipped with a note,
     and an empty directory is an error."""
     out_dir = Path(out_dir) if out_dir else Path(csv_dir)
@@ -244,13 +287,16 @@ def pool_all(csv_dir, out_dir=None, tag="_3km", levels=tuple(LEVELS),
             continue
         if mode:
             df = matched(df, mode)
+        if pool_leads:
+            df = df.assign(lead_h="all")
         if lt == "ctc":
             log(f"\nCases   : {df['case'].nunique()}   (windows / runs per "
                 "source)")
             log(coverage(df).to_string())
         for level in levels:
             table = pool(df, lt, level)
-            path = out_path(out_dir, level, lt, tag, mode)
+            path = out_path(out_dir, level, lt, tag, mode,
+                            pool_leads=pool_leads)
             table.to_csv(path, index=False, float_format="%.6g")
             written[(level, lt)] = path
             log(f"{lt:<7} {level:<5} {len(table):>7,} rows -> {path.name}")
@@ -270,11 +316,15 @@ def main(argv=None):
                          "_3km_coast50km, or '' for 6 km")
     ap.add_argument("--level", nargs="+", choices=list(LEVELS),
                     default=list(LEVELS))
-    ap.add_argument("--matched", choices=("windows", "leads"),
+    ap.add_argument("--matched", choices=("windows", "leads", "fixed"),
                     help="pool only the windows, or the (window, lead) "
-                         "pairs, every source has runs for")
+                         "pairs, every source has runs for; fixed: the "
+                         "windows that have every lead of FIXED_LEADS")
+    ap.add_argument("--pool-leads", action="store_true",
+                    help="sum all leads together (lead_h becomes 'all')")
     a = ap.parse_args(argv)
-    pool_all(a.csv_dir, a.out_dir, a.tag, tuple(a.level), a.matched)
+    pool_all(a.csv_dir, a.out_dir, a.tag, tuple(a.level), a.matched,
+             a.pool_leads)
 
 
 if __name__ == "__main__":

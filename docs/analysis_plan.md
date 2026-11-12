@@ -1082,11 +1082,153 @@ track error is out of scope for now (see Deferred).
 
 Colorblind-safe palettes throughout (Okabe-Ito; no red/green pairings).
 
+### Completed
+
+- **Spatial 3 h panels, WoFS | HAFS | truth** (`plot-eyeball`, D5b; the first
+  half of F4). One figure per (window, HAFS cycle, WoFS member). One-run flags:
+  `--members 0 3 6 9`, `--windows 5`, `--cycles N` or `--cycle-every-h 12`, and
+  `--domain wide|wofs` (`wofs` zooms to the deployment grid; figure names gain
+  `_wofsdomain`). Difference panels (obs - model) are not drawn yet.
+- **Validity-mask check** (`plot-mask-check`, E0b): kept / discarded / gap /
+  neither classes per window and a coverage summary, for any `--coast-km`.
+- **HAFS regrid check** (`plot-hafs-check`, D5b): native 3 h bucket next to the
+  regridded file.
+- **Categorical and continuous score figures** (`plot_stats.py`, from the
+  bootstrap tables; 117 figures, one score per figure, never everything at once):
+  - Score vs lead time with 95 % window-bootstrap bands, on a **fixed window set**
+    (`bootstrap_stats.py --matched fixed`: the windows that have every one of HAFS
+    leads 6-48 h at 6 h steps and WoFS leads 3-6 h; 11 windows). For ETS, CSI,
+    frequency bias, POD and success ratio (1 - FAR): one figure per model with a
+    line per threshold (`lead_<score>_model-<m>`) and one per threshold with a line
+    per model (`lead_<score>_thresh-<t>mm`). RMSE: per model (all and wet cells)
+    and per cell set (models).
+  - Score vs threshold, a line per model, at lead 6 h (head-to-head sample, 12
+    windows) and with all leads summed (`--matched windows --pool-leads`, 44
+    windows): `thresh_<score>_lead6|allleads`; RMSE as grouped bars.
+  - **Performance diagrams** (POD vs success ratio, CSI contours, bias lines;
+    shapes are models: diamond HFSA, square HFSB, circle WoFS; colours are
+    thresholds): per model, per threshold (all models), and everything on one plot,
+    each for lead 6 h and for all leads. Hollow markers have fewer than 1,000
+    observed-event cells; crosses are the bootstrap bands (not drawn on the
+    everything plot).
+  - Figures go to `figures/stats-categorical-continuous/`, named
+    `<kind>_<score or model/threshold>_<sample>_3km.png`.
+
+### To Complete
+
+Analyses I want to add and have not done yet (commitments; unsorted ideas are
+under To Consider).
+
+- **G3. Storm-location stratification** (moved here from Phase G; method revised
+  2026-11-11). Locate each WoFS domain relative to the NHC best track, first as
+  two printed numbers per domain, before any plot or stratification:
+  1. **Distance from the domain center to the TC center.** The domain center is
+     the center of the deployment's WoFS grid (mean of the four central cells).
+     The TC position is the best-track fix *nearest in time* to each 3 h window's
+     midpoint, used only if that fix is within 3 h of it (half the 6-hourly fix
+     spacing, so it fails only at the ends of the track). No interpolation. If
+     the best track ends before the domain is formed, or starts after it, print
+     `time out of bounds: <h> h off` instead of a distance.
+  2. **Distance from the domain center to the landfall position,** to quantify
+     how far inland the domain sits: the storm's *final mainland landfall*, the
+     same position for every window of a domain, with the hours from landfall to
+     each window midpoint. A b-deck carries no landfall flag, so landfalls are
+     detected from the track: an ocean-to-land step onto a mainland landmass
+     (Natural Earth 50 m land polygons above 100,000 km2, which keeps Baja
+     California and the Yucatan and drops islands), placed where the line between
+     the two fixes crosses the coast. All landfalls found are printed and the last
+     is the reference. Limit: a storm that moves from one landmass to another
+     over land (Hilary, Baja California into California) has no ocean-to-land step
+     for the second, so its reference is the first; check against NHC reports.
+
+  *Done:* `python analysis/run.py storms/<case>.yaml storm-location` prints both
+  numbers per window (no files, no plots); `storm_location.py`. Beryl's real best
+  track gives landfalls at 2024-07-05 10:54Z (20.29N 87.38W, Yucatan) and
+  2024-07-08 07:58Z (28.59N 96.00W, Texas), the second within about 40 km of the
+  NHC report. *Remaining:* check the printout for all 11 domains, then the
+  stratification itself.
+
+  This is the backbone for stratifying the statistics by storm distance (e.g.
+  "mostly TC" vs "little TC" windows); the older design computed the percent of
+  obs-valid cells within 500 km of the TC center in the deployment's projected
+  plane, and that remains the next step once the two numbers look right. These
+  need no model data, so they join the manifest and the statistics tables when
+  this is finished.
+
+### To Consider
+
+**Initial findings** (from the pooled E4 / bootstrap E4b tables, 11 cases, MRMS
+truth, 3 km; the head-to-head sample is 12 windows at lead 6 over 4 storms, the
+fixed-window lead-curve sample 11 windows). Hypotheses about causes are
+untested; none was checked against maps.
+
+1. **WoFS vs HAFS ETS is within noise.** At 10 mm, lead 6: WoFS 0.385, HFSA
+   0.389, HFSB 0.365. The paired WoFS - HFSA difference is -0.004, 95 % interval
+   -0.086 to +0.061. The one clear ETS separation is WoFS - HFSA at 25 mm
+   (-0.037, interval -0.080 to -0.014).
+2. **WoFS under-forecasts light rain.** At 0.5 mm its frequency bias is 0.84
+   against 1.15 (HFSA) and 1.20 (HFSB); the paired difference (-0.31, interval
+   -0.43 to -0.23) excludes zero.
+3. **WoFS drifts quickly with lead** (the 32 windows with leads 3-6 h held
+   fixed): ETS at 0.5 mm falls from 0.47 at lead 3 to 0.37 at lead 6 and the
+   light-rain bias from 0.98 to 0.86, while at 25 mm the bias rises from 0.92 to
+   1.23. Light-rain coverage shrinks and heavy rain gets heavier.
+4. **The HAFS lead-time decay in the pooled curve is mostly sampling.** The
+   unmatched HFSA curve falls from 0.45 (15 h) to 0.27 (51 h), but on the fixed
+   set of 12 windows that have a lead-6 cycle, ETS is flat at about 0.38 from 6 to
+   36 h and only drops to 0.34 and 0.33 at 42 and 48 h. Different windows enter at
+   different leads, so lead curves must use a fixed window set.
+5. **No model wins everywhere; it depends on the storm** (10 mm ETS, all leads).
+   Milton: WoFS 0.45 vs HAFS 0.39 / 0.40. Helene: HFSB 0.44, HFSA 0.39, WoFS
+   0.38. Hilary: all weak (0.17-0.23) and over-forecasting (bias 1.27-1.30).
+   Beryl: HAFS under-forecasts (bias 0.73-0.80), WoFS about 1.0.
+6. **WoFS members differ more than WoFS differs from HAFS.** At 10 mm the 18
+   members' ETS runs 0.315-0.372 and bias 0.84-1.04, a larger spread than the
+   model-to-model differences in 1. Which member or summary represents "WoFS"
+   matters; ensemble mean and probability-matched mean (Phase G) are needed for a
+   fair comparison.
+7. **At matched lead WoFS has equal categorical skill but worse continuous
+   error.** RMSE is 1.06 mm higher than HFSA over all cells (interval 0.18 to
+   2.13) and 2.3 mm higher over wet cells (1.0 to 3.9); correlation 0.55 vs 0.64.
+8. **HFSB is better than HFSA at mid leads** in the pooled data: ETS higher by
+   0.03-0.06 at 24-36 h, lower at 6 h and 15-18 h. Unequal samples; check on the
+   fixed windows.
+9. **Useful neighborhood scale.** At 25 mm FSS is below the useful benchmark
+   (0.5 + base rate / 2) at 9 km for HFSA and up to about 21 km for WoFS; at 1 and
+   10 mm all three are above it at every scale.
+10. **The sample is dominated by wet storms.** The share of cells with at least
+    10 mm is about 25 % for Helene d1, 16 % Milton, 7-10 % Beryl d1, but only
+    0.5-0.8 % for Hilary d1 and d2, so pooled scores are mostly Helene, Milton and
+    Beryl.
+11. **The 100-150 mm thresholds are too thin to plot unannotated.** HAFS has 484
+    cells at 150 mm and 3,267 at 125 mm over the whole sample; their intervals
+    include zero or negative ETS. Mark low-`obs_events` points or cap at 50-75 mm.
+12. **Data checks.** HFSA and HFSB have identical event counts (same truth cells),
+    Beryl 0710 d1 and d2 have a single HAFS window each, and Milton's valid mask
+    covers 60,793 cells against 90,000 for most cases.
+
+**Suggested plots**, by finding:
+
+| Finding | Plot |
+|---|---|
+| 1, 2, 7 | **Forest plot** of paired differences (WoFS - HFSA, WoFS - HFSB, HFSA - HFSB) vs threshold with 95 % intervals and a zero line, one panel each for ETS, bias and RMSE; open markers where the interval includes zero; points with few events greyed. Reads `bootdiff_*_matched_leads.csv`. FSS variant with scale on the vertical axis. |
+| 2, 3 | **Performance diagram** (POD vs success ratio, CSI and bias contours), one marker per source and threshold at lead 6, with the WoFS lead 3 -> 6 trajectory as arrows per threshold. |
+| 4 | **Lead curves on a fixed window set** with bootstrap bands, labeled with the window count; a faint unmatched curve behind shows the sampling effect. |
+| 9 | **FSS vs neighborhood scale** (F1), one panel per threshold, with the useful-FSS line dotted and the first scale above it marked. |
+| 5, 10 | **Per-storm dot plot** of ETS and bias by source (storms as rows, marker size ~ event count) annotated with each storm's base rate. |
+| 6 | **Strip plot of per-member ETS and bias** (one dot per member) with HFSA and HFSB as horizontal lines; needs the per-run tables, not the pooled ones. |
+| 5 | **Leave-one-storm-out dumbbell**: the ETS difference with and without each storm (`loo_storm_*.csv`). |
+| 9, 11 | **Heatmap of FSS differences** (WoFS - HAFS), threshold by scale, hatched where the interval includes zero. |
+| 12 | **Coverage matrix** (case by lead, window counts in the cells), a supplementary figure. |
+
+The earlier plan, kept as it was:
+
 - **F1.** FSS vs neighborhood scale, one curve per lead — the fairness plot for
   the HAFS/WoFS resolution difference.
 - **F2.** ETS/CSI vs threshold, per lead.
 - **F3.** Lead-time series of bias, RMSE, and FSS at a fixed scale.
-- **F4.** Spatial 3 h panels: obs, WoFS, HAFS, differences for selected windows.
+- **F4.** Spatial 3 h panels: obs, WoFS, HAFS, differences for selected windows
+  (the obs / WoFS / HAFS part is done, see Completed).
 
 *MET:* none — matplotlib reading the Phase E CSV.
 
@@ -1097,13 +1239,7 @@ Colorblind-safe palettes throughout (Okabe-Ito; no red/green pairings).
 - **G1.** Probability-matched mean of WoFS members; verify it as a field.
 - **G2.** WoFS ensemble and lagged HAFS ensemble (several cycles of one
   configuration, valid at the same window); `gen_ens_prod`, `ensemble_stat`.
-- **G3.** Storm-proximity stratification: for each valid window, from the NHC
-  best track (b-deck) interpolated to the window midpoint, the distance from the
-  TC center to the domain center, whether the center is inside the domain, and
-  the percent of obs-valid domain cells within 500 km of it (computed in the
-  deployment's projected plane so 500 km is a true constant radius). Then ask
-  whether "mostly TC" and "little TC" windows diverge. These need no model data,
-  so they join the manifest and the statistics tables whenever this is done.
+- **G3.** Storm-location stratification: moved to Phase F, *To Complete*.
 - **G4.** Stage IV sensitivity: repeat E on `truth_source: stage4`.
 - **G5.** Mixing HAFS-A and HAFS-B as an explicit experiment.
 

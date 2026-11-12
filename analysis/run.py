@@ -74,6 +74,12 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 taken from the MODEL tag and window folder. Exits non-zero
                 listing missing runs, wrong row counts or duplicate keys.
                 Plain Python; runs on a login node after grid-stat
+  storm-location G3 step 1: for each 3 h window, print the distance from the
+                centre of the WoFS domain to the nearest-in-time NHC best-track
+                fix (within 3 h, else "time out of bounds"), and the distance
+                to the storm's final mainland landfall (found from the track).
+                Print only, no files; needs build-grid and, the first time on a
+                host, internet for cartopy's Natural Earth land polygons
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself
@@ -122,8 +128,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
             "regrid-hafs", "window-obs", "plot-eyeball",
             "plot-hafs-check", "plot-mask-check", "grid-stat-test", "grid-stat",
-            "parse-stat", "download-obs", "regrid-obs", "plot-regrid",
-            "stats-regrid")
+            "parse-stat", "storm-location", "download-obs", "regrid-obs",
+            "plot-regrid", "stats-regrid")
 
 
 def parse_args(argv):
@@ -255,6 +261,9 @@ def dispatch(case, command):
     if command == "parse-stat":
         from stat_tables import parse_stat_case
         return parse_stat_case(case)
+    if command == "storm-location":
+        from storm_location import storm_location_case
+        return storm_location_case(case)
     if command == "download-obs":
         import obs_cases
         return obs_cases.download_obs(case)
