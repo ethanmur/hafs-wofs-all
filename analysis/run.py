@@ -86,6 +86,9 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 tracks (HFSA/HFSB a-deck) of every cycle in the window's sample,
                 each from its initialization to the window end. Needs the
                 storm's a-deck: fetch_bdecks.py --adeck
+  plot-swaths   per 3 h window: WoFS (left, blue) and HAFS (right, vermillion)
+                maps of the percentage of members at or above --thresh-mm
+                (default 25 mm per 3 h) at each cell; member counts in the title
   plot-tc-location
                 per 3 h window: best track, WoFS domain, nearest fix and final
                 landfall with the distances from the domain center (the
@@ -139,7 +142,7 @@ COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
             "regrid-hafs", "window-obs", "plot-eyeball",
             "plot-hafs-check", "plot-mask-check", "grid-stat-test", "grid-stat",
             "parse-stat", "storm-location", "plot-hafs-tracks",
-            "plot-tc-location", "download-obs", "regrid-obs", "plot-regrid",
+            "plot-tc-location", "plot-swaths", "download-obs", "regrid-obs", "plot-regrid",
             "stats-regrid")
 
 
@@ -238,6 +241,9 @@ def split_plot_options(argv):
     return argv, found
 
 
+swath_options = {}        # set by main: {"thresh_mm": ...} for plot-swaths
+
+
 def dispatch(case, command):
     """Run one command for a loaded DeploymentCase."""
     if command == "build-grid":
@@ -282,6 +288,9 @@ def dispatch(case, command):
     if command == "plot-hafs-tracks":
         from track_plots import plot_hafs_tracks
         return plot_hafs_tracks(case)
+    if command == "plot-swaths":
+        from swath_plots import plot_swaths
+        return plot_swaths(case, **swath_options)
     if command == "plot-tc-location":
         from track_plots import plot_tc_location
         return plot_tc_location(case)
@@ -299,15 +308,26 @@ def dispatch(case, command):
 
 
 def main(argv):
+    if "--thresh-mm" in argv:             # plot-swaths threshold
+        i = argv.index("--thresh-mm")
+        try:
+            swath_options["thresh_mm"] = float(argv[i + 1])
+            if swath_options["thresh_mm"] <= 0:
+                raise ValueError
+        except (IndexError, ValueError):
+            print("--thresh-mm needs a positive number, e.g. --thresh-mm 25")
+            raise SystemExit(2)
+        argv = argv[:i] + argv[i + 2:]
     include_spinup = None
     if "--include-spinup" in argv:        # regrid and score the 0-3 h HAFS cycle
         argv = [a for a in argv if a != "--include-spinup"]
         include_spinup = True
     argv, plot = split_plot_options(argv)
     yaml_path, command, res_km, sources, coast_km = parse_args(argv)
-    if plot and command not in ("plot-eyeball", "plot-hafs-check"):
+    if plot and command not in ("plot-eyeball", "plot-hafs-check",
+                                "plot-swaths"):
         print(f"{', '.join('--' + k.replace('_', '-') for k in plot)} "
-              "only apply to plot-eyeball and plot-hafs-check")
+              "only apply to plot-eyeball, plot-hafs-check and plot-swaths")
         raise SystemExit(2)
     import dataclasses
     import deployment_case

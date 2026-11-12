@@ -1185,8 +1185,10 @@ under To Consider).
   need no model data, so they join the manifest and the statistics tables when
   this is finished.
 
-- **HAFS track plot and best-track location plot** (built; to be checked on the
-  real domains, then moved to Completed). Both per domain and per 3 h window, one
+- **HAFS track plot** (best track drawn over the HAFS tracks, final-position
+  circles on top: confirmed on real data 2026-11-12, done) **and best-track location
+  plot** (built; `plot-tc-location` still to be checked on the real domains, then
+  moved to Completed). Both per domain and per 3 h window, one
   flat folder `figures/storm-tracks/`:
   - `plot-hafs-tracks`: the NHC best track drawn over (thinner, white-outlined) the
     HAFS forecast tracks of every cycle in that window's sample (HFSA blues, HFSB oranges, darker =
@@ -1200,10 +1202,35 @@ under To Consider).
     the distances from the domain center to each; out-of-bounds windows say so.
 
 - **Work queue** (one at a time, in this order; recorded 2026-11-12):
-  1. **`plot-hafs-tracks`: best track on top** (done 2026-11-12, to check on real a-decks). Draw the best track above the HAFS
-     tracks (thinner, outlined, so the HAFS lines stay readable) and keep the
-     final HAFS track-position circles above both, to see how members sit relative
-     to the best track.
+  1. **Member-exceedance swath maps, WoFS vs HAFS, per window** (built; added
+     2026-11-12; the previous item 1, the best track drawn over the HAFS tracks
+     in `plot-hafs-tracks`, was confirmed on real data and is in Completed). One
+     figure per domain and window, two map panels side by side: WoFS left, HAFS
+     right. Each panel's title gives its member count (WoFS 18; HAFS the cycles
+     of the window's sample, up to 8 per configuration). Each map shows, at every
+     cell, the number of members whose 3 h rain is at or above one threshold (an
+     exceedance count, a swaths-of-agreement picture); the colorbar is placed
+     on the outer side of each panel (WoFS left, HAFS right). For slide use: a
+     single threshold, `--thresh-mm` (default 25 mm per 3 h, about 1 inch: heavy
+     rain that separates the swath cores; 10 mm is the alternative for wide
+     swaths, 50 mm for extremes only), a sequential colormap with white at 0
+     members so the dry area stays clean, the same domain extent and the validity
+     mask outline on both panels, and the best-track fix at the window midpoint
+     if it is inside the domain. Open choices: color by member count or by the
+     fraction of members (the panels have different totals, so a fraction makes the
+     two colorbars comparable); whether the HAFS panel pools HFSA and HFSB or
+     draws one panel per configuration (default pooled, with the count printed).
+     Built from the regridded member files, no new MET run; an obs panel could
+     be added later as the dotted contour at the same threshold.
+     Built 2026-11-12 as `plot-swaths` (`analysis/swath_plots.py`; `--thresh-mm`,
+     default 25; `--domain wide|wofs`): one pooled HFSA+HFSB panel, percent of
+     members (0-100, ten steps, zero cells blank), WoFS white-to-blue with its
+     colorbar on the left, HAFS white-to-vermillion (Okabe-Ito) on the right,
+     member counts in the figure subtitle (WoFS 18 from the shortest-lead init;
+     HAFS cycles split by configuration), one figure per window in
+     `figures/ensemble-swaths/swaths_<case>_<window end>_ge25mm.png`. Tested on
+     synthetic files; to check on Orion. The 0-3 h HAFS cycle joins only with
+     `--include-spinup`.
   2. **The 0-3 h period for HAFS, with a toggle** (built 2026-11-12; run on Orion
      next). WoFS already has it: a WoFS init at the window start has `lead_h` 3
      (forecast hours 0-3) and stays in every table and figure. HAFS had it

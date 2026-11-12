@@ -7,12 +7,12 @@ in the full plan; ✅ done, 🔧 built but unchecked on real data, ⏳ to do.
 
 ## Next up (Phase F work queue, in order)
 
-1. 🔧 `plot-hafs-tracks`: best track now drawn over the HAFS tracks, final-position circles on top; check on real a-decks.
+1. 🔧 `plot-swaths` built: WoFS (blue, left) vs HAFS (vermillion, right, HFSA+HFSB pooled), percent of members at or above `--thresh-mm` (default 25 mm / 3 h), counts in the subtitle; run on Orion and check.
 2. 🔧 0-3 h HAFS period: built (`hafs.include_spinup` / `--include-spinup`, `--first-bucket exclude|include`, `--matched fixed-spinup`, `--spinup-only` eyeball flag); run on Orion, default stays exclude until you see the plots.
 3. ⏳ WoFS and HAFS ensembles (HFSA, HFSB, all HAFS): ensemble mean and PMM scored like members, then paired comparison with members.
 4. ⏳ Inland vs landfalling verification: you classify domains/windows from the storm-location tables, then repeat the statistics per class.
 - ⏳ G3 stratification (storm distance): step 1 (`storm-location` printout) done; check all 11 domains, then the stratification.
-- 🔧 `plot-hafs-tracks` / `plot-tc-location`: built on synthetic data; run on the real a-decks and check.
+- 🔧 `plot-tc-location`: built on synthetic data; check on the real domains (`plot-hafs-tracks` is confirmed).
 
 ## Settled design decisions
 
@@ -102,12 +102,13 @@ in the full plan; ✅ done, 🔧 built but unchecked on real data, ⏳ to do.
 - ✅ All-available-data set of the same figures (`--sample-set all|matched|both`, `_allwindows` names).
 - ✅ Samples documented: lead 6 = 12 windows in 7 domains; fixed lead curves = 11; all leads matched = 43; unmatched = 47 windows in 10 cases.
 - ✅ Beryl 20240710_d1 excluded from all pooled tables (domain over Iowa, not Beryl-related).
+- ✅ `plot-hafs-tracks` with the best track over the HAFS tracks and final-position circles on top (confirmed on real data).
 
 ### To Complete
 
 - 🔧 G3 storm-location stratification: `storm-location` printout of distances to the TC and to landfall per window; stratification pending.
-- 🔧 `plot-hafs-tracks` and `plot-tc-location` per domain and window (a-decks via `fetch_bdecks.py --adeck`), to be checked on real data.
-- ⏳ Work queue (see Next up): best-track edit 🔧 and 0-3 h period 🔧 built; ensembles and inland vs landfalling to do.
+- 🔧 `plot-tc-location` per domain and window (a-decks via `fetch_bdecks.py --adeck`), to be checked on real data.
+- ⏳ Work queue (see Next up): 0-3 h period 🔧 built (in progress); swath maps, ensembles and inland vs landfalling to do.
 
 ### To Consider
 
