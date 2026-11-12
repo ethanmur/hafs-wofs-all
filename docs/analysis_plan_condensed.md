@@ -7,7 +7,7 @@ in the full plan; ✅ done, 🔧 built but unchecked on real data, ⏳ to do.
 
 ## Next up (Phase F work queue, in order)
 
-1. 🔧 `plot-swaths` built: WoFS (blue, left) vs HAFS (vermillion, right, HFSA+HFSB pooled), percent of members at or above `--thresh-mm` (default 25 mm / 3 h), counts in the subtitle; run on Orion and check.
+1. 🔧 `plot-swaths` built: WoFS (blue, left) vs HAFS (vermillion, right, HFSA+HFSB pooled), percent of members at or above `--thresh-mm` (default 25 mm / 3 h), now 3 panels (WoFS | HAFS | MRMS with truth contour and full best track), larger fonts, darker 100% end; rerun on Orion and check.
 2. 🔧 0-3 h HAFS period: built (`hafs.include_spinup` / `--include-spinup`, `--first-bucket exclude|include`, `--matched fixed-spinup`, `--spinup-only` eyeball flag); run on Orion, default stays exclude until you see the plots.
 3. ⏳ WoFS and HAFS ensembles (HFSA, HFSB, all HAFS): ensemble mean and PMM scored like members, then paired comparison with members.
 4. ⏳ Inland vs landfalling verification: you classify domains/windows from the storm-location tables, then repeat the statistics per class.

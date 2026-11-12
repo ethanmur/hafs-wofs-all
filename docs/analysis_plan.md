@@ -1222,6 +1222,12 @@ under To Consider).
      draws one panel per configuration (default pooled, with the count printed).
      Built from the regridded member files, no new MET run; an obs panel could
      be added later as the dotted contour at the same threshold.
+     Revised 2026-11-12 after the first Orion run: three panels, WoFS (N Members) |
+     HAFS (N Members) | MRMS (Truth); the truth threshold contour (black) on all
+     three panels to judge each ensemble; the full best track and the storm
+     position at the window midpoint on the MRMS panel only; 100 % end darker
+     (blue #003A63, vermillion #7A2D00), 0 % blank; larger fonts for slides; the
+     figure title kept, the member counts only in the panel titles.
      Built 2026-11-12 as `plot-swaths` (`analysis/swath_plots.py`; `--thresh-mm`,
      default 25; `--domain wide|wofs`): one pooled HFSA+HFSB panel, percent of
      members (0-100, ten steps, zero cells blank), WoFS white-to-blue with its
