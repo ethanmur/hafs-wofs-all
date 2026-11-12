@@ -1155,6 +1155,20 @@ under To Consider).
   need no model data, so they join the manifest and the statistics tables when
   this is finished.
 
+- **HAFS track plot and best-track location plot** (built; to be checked on the
+  real domains, then moved to Completed). Both per domain and per 3 h window, one
+  flat folder `figures/storm-tracks/`:
+  - `plot-hafs-tracks`: the NHC best track beneath the HAFS forecast tracks of
+    every cycle in that window's sample (HFSA blues, HFSB oranges, darker =
+    shorter lead), each drawn from its initialization to the window end only,
+    from the storm's a-deck (`python analysis/fetch_bdecks.py --adeck`; HAFS-A
+    and HAFS-B are techs `HFSA` and `HFSB`; 6-hourly fixes, interpolated linearly
+    to the window end). Landfalling storms show cycles back to 48 h before;
+    inland cases fewer, still drawn. Shows track errors.
+  - `plot-tc-location`: the `storm-location` table made visual: best track, WoFS
+    domain outline and center, the nearest-in-time fix, the final landfall, and
+    the distances from the domain center to each; out-of-bounds windows say so.
+
 ### To Consider
 
 **Initial findings** (from the pooled E4 / bootstrap E4b tables, 11 cases, MRMS

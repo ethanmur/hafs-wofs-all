@@ -75,11 +75,20 @@ Loads a per-deployment case (deployment_case.py) and runs one command:
                 listing missing runs, wrong row counts or duplicate keys.
                 Plain Python; runs on a login node after grid-stat
   storm-location G3 step 1: for each 3 h window, print the distance from the
-                centre of the WoFS domain to the nearest-in-time NHC best-track
+                center of the WoFS domain to the nearest-in-time NHC best-track
                 fix (within 3 h, else "time out of bounds"), and the distance
                 to the storm's final mainland landfall (found from the track).
                 Print only, no files; needs build-grid and, the first time on a
                 host, internet for cartopy's Natural Earth land polygons
+  plot-hafs-tracks
+                per 3 h window: the NHC best track beneath the HAFS forecast
+                tracks (HFSA/HFSB a-deck) of every cycle in the window's sample,
+                each from its initialization to the window end. Needs the
+                storm's a-deck: fetch_bdecks.py --adeck
+  plot-tc-location
+                per 3 h window: best track, WoFS domain, nearest fix and final
+                landfall with the distances from the domain center (the
+                storm-location table made visual)
   download-obs  fetch/cache MRMS only -- no regridding or plotting; run this
                 on a login node. Stage IV hourly data is NOT fetched here (see
                 analysis/stage4_hourly.py); place it in the cache yourself
@@ -128,8 +137,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 COMMANDS = ("build-grid", "build-mask", "build-manifest", "regrid-wofs",
             "regrid-hafs", "window-obs", "plot-eyeball",
             "plot-hafs-check", "plot-mask-check", "grid-stat-test", "grid-stat",
-            "parse-stat", "storm-location", "download-obs", "regrid-obs",
-            "plot-regrid", "stats-regrid")
+            "parse-stat", "storm-location", "plot-hafs-tracks",
+            "plot-tc-location", "download-obs", "regrid-obs", "plot-regrid",
+            "stats-regrid")
 
 
 def parse_args(argv):
@@ -264,6 +274,12 @@ def dispatch(case, command):
     if command == "storm-location":
         from storm_location import storm_location_case
         return storm_location_case(case)
+    if command == "plot-hafs-tracks":
+        from track_plots import plot_hafs_tracks
+        return plot_hafs_tracks(case)
+    if command == "plot-tc-location":
+        from track_plots import plot_tc_location
+        return plot_tc_location(case)
     if command == "download-obs":
         import obs_cases
         return obs_cases.download_obs(case)

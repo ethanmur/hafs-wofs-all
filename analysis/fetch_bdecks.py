@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Download the NHC b-decks for a list of storms, skipping those on disk.
+"""Download the NHC b-decks (or, with --adeck, a-decks) for a list of storms,
+skipping those on disk.
 
 Storms may come from an explicit list (--storm-list / --storms) or, with
 neither given, from the subdirectory names of the HAFS run directory. Any of
@@ -24,6 +25,11 @@ Usage:
     python analysis/fetch_bdecks.py --inventory          # report only
     python analysis/fetch_bdecks.py --dry-run
     python analysis/fetch_bdecks.py --hafs-dir DIR --bdeck-dir DIR
+    python analysis/fetch_bdecks.py --adeck              # a-decks: HFSA/HFSB tracks
+
+An a-deck (aal142024.dat) holds every model's forecast tracks, including HAFS-A
+and HAFS-B (`HFSA`, `HFSB`), for the storm's whole life; plot-hafs-tracks reads
+them. They are written to --adeck-dir, beside the b-deck folder by default.
 """
 
 import argparse
@@ -34,10 +40,12 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from adeck import adeck_summary
 from best_track import bdeck_summary
 
 HAFS_DIR = Path("/work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/hafs")
 BDECK_DIR = Path("/work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/bdeck")
+ADECK_DIR = Path("/work2/noaa/aoml-hafs1/emurray/ppgc-hafs/data/adeck")
 ARCHIVE_URL = "https://ftp.nhc.noaa.gov/atcf/archive/{year}/{name}.gz"
 BASINS = {"l": "al", "e": "ep", "c": "cp", "w": "wp"}
 BASIN_IDS = {v: v for v in BASINS.values()}
@@ -66,6 +74,11 @@ def bdeck_name(storm):
                      "2023-10l, AL102023 or bal102023.dat)")
 
 
+def adeck_name(storm):
+    """Storm identifier -> a-deck filename (bal022024.dat -> aal022024.dat)."""
+    return "a" + bdeck_name(storm)[1:]
+
+
 def bdeck_year(name):
     """'bal022024.dat' -> '2024', the ATCF archive subdirectory."""
     return name[5:9]
@@ -81,6 +94,32 @@ def read_storm_list(path):
     if not storms:
         raise ValueError(f"no storms listed in {path}")
     return storms
+
+
+def print_adeck_inventory(adeck_dir, storms):
+    """Summarise each storm's a-deck: HAFS cycles per model."""
+    print(f"\n{'storm':<12}{'a-deck':<16}{'HFSA cycles':<28}HFSB cycles")
+    for storm in storms:
+        try:
+            name = adeck_name(storm)
+        except ValueError:
+            continue
+        path = adeck_dir / name
+        if not path.exists():
+            print(f"  {storm:<10}{name:<16}(not on disk)")
+            continue
+        try:
+            info = adeck_summary(path)
+        except (OSError, ValueError) as err:
+            print(f"  {storm:<10}{name:<16}UNREADABLE: {err}")
+            continue
+
+        def text(tech):
+            if tech not in info:
+                return "none"
+            n, first, last = info[tech]
+            return f"{n} ({first:%m-%d %HZ} to {last:%m-%d %HZ})"
+        print(f"  {storm:<10}{name:<16}{text('HFSA'):<28}{text('HFSB')}")
 
 
 def print_inventory(bdeck_dir, storms):
@@ -125,6 +164,11 @@ def main(argv=None):
                         help="directory of <year>-<storm> run folders")
     parser.add_argument("--bdeck-dir", type=Path, default=BDECK_DIR,
                         help="where b-decks are kept")
+    parser.add_argument("--adeck", action="store_true",
+                        help="fetch a-decks (HFSA/HFSB forecast tracks) into "
+                        "--adeck-dir instead of b-decks")
+    parser.add_argument("--adeck-dir", type=Path, default=ADECK_DIR,
+                        help="where a-decks are kept (with --adeck)")
     parser.add_argument("--storms", help="comma-separated storm identifiers, "
                         "e.g. 2024-02l,AL092024")
     parser.add_argument("--storm-list", type=Path,
@@ -152,25 +196,28 @@ def main(argv=None):
             sys.exit(f"ERROR: no storm directories under {args.hafs_dir}")
         source = str(args.hafs_dir)
 
+    deck_dir = args.adeck_dir if args.adeck else args.bdeck_dir
+    namer = adeck_name if args.adeck else bdeck_name
+    inventory = print_adeck_inventory if args.adeck else print_inventory
     print(f"Storms ({len(storms)}) from {source}: {', '.join(storms)}")
-    print(f"B-deck dir:  {args.bdeck_dir}\n")
+    print(f"{'A' if args.adeck else 'B'}-deck dir:  {deck_dir}\n")
 
     if args.inventory:
-        print_inventory(args.bdeck_dir, storms)
+        inventory(deck_dir, storms)
         return 0
 
     if not args.dry_run:
-        args.bdeck_dir.mkdir(parents=True, exist_ok=True)
+        deck_dir.mkdir(parents=True, exist_ok=True)
     failed = []
     fetched = skipped = 0
     for storm in storms:
         try:
-            name = bdeck_name(storm)
+            name = namer(storm)
         except ValueError as err:
             print(f"  {storm:<12} SKIPPED  {err}")
             failed.append(storm)
             continue
-        dest = args.bdeck_dir / name
+        dest = deck_dir / name
         if dest.exists():
             skipped += 1
             print(f"  {storm:<12} {name:<16} already present")
@@ -191,7 +238,7 @@ def main(argv=None):
     print(f"\n{fetched} downloaded, {skipped} already present, "
           f"{len(failed)} failed")
     if not args.dry_run:
-        print_inventory(args.bdeck_dir, storms)
+        inventory(deck_dir, storms)
     if failed:
         print("Failed storms: " + ", ".join(failed))
         return 1

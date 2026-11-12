@@ -45,7 +45,10 @@ python analysis/run.py storms/<case>.yaml plot-mask-check    # validity mask vs 
 python analysis/run.py storms/<case>.yaml grid-stat-test     # E1: grid_stat on one window
 python analysis/run.py storms/<case>.yaml grid-stat          # E2: every window, every run (one SLURM job per deployment)
 python analysis/run.py storms/<case>.yaml parse-stat         # E3: .stat files -> data/grid-stat/csvs/stat_<linetype>_<case>.csv
-python analysis/run.py storms/<case>.yaml storm-location     # G3 step 1: distance from the domain centre to the TC and to landfall, per window (print only)
+python analysis/run.py storms/<case>.yaml storm-location     # G3 step 1: distance from the domain center to the TC and to landfall, per window (print only)
+python analysis/fetch_bdecks.py --adeck                      # download a-decks (HFSA/HFSB forecast tracks) into data/adeck/
+python analysis/run.py storms/<case>.yaml plot-hafs-tracks   # best track under the HAFS cycle tracks, per window
+python analysis/run.py storms/<case>.yaml plot-tc-location   # best track, domain, nearest fix and landfall with distances, per window
 python analysis/pool_stats.py --csv-dir data/grid-stat/csvs  # E4: pooled scores (laptop or Orion; no MET needed)
 python analysis/bootstrap_stats.py --csv-dir data/grid-stat/csvs --matched leads  # E4b: window-bootstrap CIs, paired differences, leave-one-storm-out
 python analysis/plot_stats.py --pooled-dir data/grid-stat/csvs_pooled --fig-dir figures/stats-categorical-continuous  # F: score vs lead / threshold, performance diagrams
@@ -89,7 +92,8 @@ analysis/
   pool_stats.py        pooled scores from summed counts and partial sums (E4)
   bootstrap_stats.py   window-bootstrap intervals, paired differences, leave-one-storm-out (E4b)
   plot_stats.py        lead / threshold score curves and performance diagrams (F)
-  storm_location.py    domain centre vs best-track fix and landfall, printed per window (G3)
+  storm_location.py    domain center vs best-track fix and landfall, printed per window (G3)
+  adeck.py / track_plots.py  HAFS forecast tracks from a-decks; the two track maps (G3)
   obs_regrid_plots.py / obs_regrid_stats.py / plot_common.py / plot_units.py
   met_regrid.py       MET regrid_data_plane wrapper and budget check
   stage4_hourly.py    Stage IV hourly access

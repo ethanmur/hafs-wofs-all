@@ -4,16 +4,16 @@
 
 Prints two numbers per 3 h window of the domain, nothing else (no plots yet):
 
-  1. the distance from the centre of the WoFS domain to the TC centre, taken
+  1. the distance from the center of the WoFS domain to the TC center, taken
      from the best-track fix nearest in time to the window midpoint, used only
      when that fix is within 3 h of it (no interpolation). A track that ends
      before the domain is formed, or starts after it, prints
      "time out of bounds: <h> h off" instead.
-  2. the distance from the domain centre to the storm's final mainland landfall,
+  2. the distance from the domain center to the storm's final mainland landfall,
      the same number for every window of the domain, with the hours from the
      landfall to the window midpoint (negative: before landfall).
 
-The domain centre is the centre of the verification grid (the mean of its four
+The domain center is the center of the verification grid (the mean of its four
 central cells). A b-deck does not flag landfall, so landfalls are found from the
 track: a step from ocean to land on a mainland landmass (Natural Earth 50 m land
 polygons larger than MAINLAND_KM2, which keeps Baja California and the Yucatan
@@ -50,7 +50,7 @@ def distance_km(lat1, lon1, lat2, lon2):
 
 
 def domain_center(case):
-    """(lat, lon) of the centre of the verification grid."""
+    """(lat, lon) of the center of the verification grid."""
     spec = vg.grid_spec_from_json(case.grid_json_path)
     lat, lon = vg.grid_latlon(spec)
     ny, nx = lat.shape
@@ -145,8 +145,8 @@ def _ew(lon):
 
 
 def print_location(case, track, center, result, tolerance_h=TOLERANCE_H):
-    print(f"Domain centre : {_ns(center[0])} {_ew(center[1])}  "
-          "(centre of the verification grid)")
+    print(f"Domain center : {_ns(center[0])} {_ew(center[1])}  "
+          "(center of the verification grid)")
     print(f"Best track    : {Path(case.best_track).name}, {len(track)} fixes "
           f"{track[0][0]:%Y-%m-%d %HZ} to {track[-1][0]:%Y-%m-%d %HZ}")
     falls = result["landfalls"]
@@ -156,12 +156,12 @@ def print_location(case, track, center, result, tolerance_h=TOLERANCE_H):
                   "  (ocean to mainland)")
         ref = result["reference"]
         print(f"Reference     : the last, {ref[0]:%Y-%m-%d %H:%MZ}; the domain "
-              f"centre is {result['rows'][0]['landfall_km']:.0f} km from it")
+              f"center is {result['rows'][0]['landfall_km']:.0f} km from it")
     else:
         print("Landfall      : none found (no ocean-to-mainland step in the "
               "best track)")
     print(f"\n{'window end':<14} {'nearest fix':<14} {'off':>6} {'status':<6} "
-          f"{'TC centre':<17} {'dist to TC':>11} {'to landfall':>12}")
+          f"{'TC center':<17} {'dist to TC':>11} {'to landfall':>12}")
     for r in result["rows"]:
         end = f"{r['window_end']:%m-%d %HZ}"
         if r["fix"] is None:

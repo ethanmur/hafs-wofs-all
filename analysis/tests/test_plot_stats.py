@@ -158,3 +158,29 @@ def test_a_missing_sample_is_skipped_not_a_crash(tables, tmp_path):
 def test_no_tables_is_an_error(tmp_path):
     with pytest.raises(SystemExit, match="bootstrap_stats"):
         pl.make_all(tmp_path, tmp_path / "f")
+
+
+def test_bands_can_be_turned_off_and_thresholds_capped(tables, tmp_path):
+    full = pl.make_all(tables, tmp_path / "a", "_3km", only=("lead",), dpi=60,
+                       log=lambda *a: 0)
+    capped = pl.make_all(tables, tmp_path / "b", "_3km", only=("lead",),
+                         dpi=60, log=lambda *a: 0, bands=False, max_thresh=10)
+    # 3 thresholds (1, 10, 50) -> 2 under the cap: 5 x (3 + 2) + 5 RMSE
+    assert len(full) == 5 * 6 + 5 and len(capped) == 5 * 5 + 5
+    assert not any("thresh-50mm" in p.name for p in capped)
+    assert pl.SETTINGS == {"bands": False, "max_thresh": 10}
+    pl.make_all(tables, tmp_path / "c", "_3km", only=("perf",), dpi=60,
+                log=lambda *a: 0)             # defaults restore themselves
+    assert pl.SETTINGS == {"bands": True, "max_thresh": None}
+
+
+def test_per_model_figures_share_one_y_range_from_the_largest_values(tables):
+    import pandas as pd
+    ctc = pd.read_csv(tables / "boot_all_ctc_3km_matched_fixed.csv")
+    ctc = pl.add_sr(ctc)
+    pl.SETTINGS.update(bands=True, max_thresh=None)
+    lims = pl.lock_ylims(ctc, ["ets", "fbias"])
+    assert lims["ets"][1] <= 1.0 and lims["ets"][0] <= 0.0
+    top = max(ctc["ets_hi"].max(), ctc["ets"].max())
+    assert lims["ets"][1] == pytest.approx(min(1.0, 1.05 * top))
+    assert lims["fbias"][0] == 0.0 and 1.5 <= lims["fbias"][1] <= 4.0

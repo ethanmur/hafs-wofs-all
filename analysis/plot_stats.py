@@ -2,7 +2,7 @@
 
     python analysis/plot_stats.py --pooled-dir data/grid-stat/csvs_pooled
         --fig-dir figures/stats-categorical-continuous [--tag _3km]
-        [--only lead thresh perf] [--dpi 150]
+        [--only lead thresh perf] [--dpi 150] [--no-bands] [--max-thresh 75]
 
 Reads the bootstrap tables bootstrap_stats.py wrote and draws one figure per
 score and partition, never everything at once. Plain matplotlib: runs on a
@@ -25,6 +25,11 @@ with its 95 % window-bootstrap band.
   perfdiag_thresh-<t>mm_...        with CSI contours and bias lines; shapes are
   perfdiag_all_...                 models, colours thresholds
 
+`--no-bands` leaves out the bootstrap bands, crosses and error bars;
+`--max-thresh` (default 75 mm) drops the thinner, noisier thresholds above it.
+The per-model figures of a score share one y range, set from the largest values
+across the models, so they compare at a glance.
+
 Markers are hollow where the threshold has fewer than MIN_EVENTS observed-event
 cells (a score from a handful of cells is noise). Colours are Okabe-Ito for the
 models and viridis for the thresholds: neither pairs red with green.
@@ -43,6 +48,9 @@ import pandas as pd
 from matplotlib.lines import Line2D
 
 MIN_EVENTS = 1000
+# Set by make_all for one run: draw the bootstrap bands, and the highest
+# threshold (mm) plotted (None: all).
+SETTINGS = {"bands": True, "max_thresh": None}
 MODELS = ("hfsa", "hfsb", "wofs")
 LABEL = {"hfsa": "HFSA", "hfsb": "HFSB", "wofs": "WoFS"}
 COLOR = {"hfsa": "#0072B2", "hfsb": "#E69F00", "wofs": "#222222"}
@@ -87,7 +95,10 @@ def load(pooled_dir, tag):
 
 
 def thresholds(df):
-    return sorted(df["thresh_mm"].unique())
+    """The thresholds to draw, up to SETTINGS["max_thresh"]."""
+    cap = SETTINGS["max_thresh"]
+    return sorted(t for t in df["thresh_mm"].unique()
+                  if cap is None or t <= cap)
 
 
 def threshold_colors(values):
@@ -103,8 +114,8 @@ def _fmt_t(t):
 
 def _windows_note(df, what):
     n = int(df["n_windows"].max())
-    return (f"{what}; {n} windows; 95 % window-bootstrap band; WoFS pools its "
-            "members")
+    band = "; 95 % window-bootstrap band" if SETTINGS["bands"] else ""
+    return f"{what}; {n} windows{band}; WoFS pools its members"
 
 
 # =============================================================================
@@ -130,14 +141,14 @@ def _line(ax, x, y, lo, hi, color, label=None, ls="-", marker="o",
             zorder=4)
     ax.plot(x[thin & np.isfinite(y)], y[thin & np.isfinite(y)], ls="none",
             marker=marker, ms=5, mfc="white", mec=color, zorder=4)
-    if band:
+    if band and SETTINGS["bands"]:
         ok = ~thin & np.isfinite(lo) & np.isfinite(hi)
         ax.fill_between(x, np.where(ok, lo, np.nan), np.where(ok, hi, np.nan),
                         color=color, alpha=0.11, lw=0, zorder=2)
 
 
 def _finish(fig, ax, path, title, note, score=None, legend=True,
-            legend_title=None, handles=None, dpi=150):
+            legend_title=None, handles=None, dpi=150, ylim=None):
     ax.set_title(title, fontsize=11, loc="left")
     fig.text(0.01, 0.01, note, fontsize=7, color="#555555", ha="left",
              va="bottom")
@@ -146,6 +157,8 @@ def _finish(fig, ax, path, title, note, score=None, legend=True,
     elif score in ("ets", "csi", "pod", "sr"):
         lo, hi = ax.get_ylim()
         ax.set_ylim(min(lo, 0.0) if lo < 0.02 else lo, min(max(hi, 0.05), 1.0))
+    if ylim is not None:
+        ax.set_ylim(*ylim)
     if legend:
         if handles is None:
             ax.legend(title=legend_title, fontsize=8, title_fontsize=8,
@@ -159,6 +172,26 @@ def _finish(fig, ax, path, title, note, score=None, legend=True,
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=dpi)
     plt.close(fig)
+
+
+def lock_ylims(df, scores, ts=None):
+    """{score: (low, high)}: one y range per score across all models (and
+    thresholds drawn), so the per-model figures can be compared side by side."""
+    out = {}
+    sub = df if ts is None else df[df["thresh_mm"].isin(ts)]
+    for score in scores:
+        est = sub[score].to_numpy(float)
+        hi = sub[f"{score}_hi"].to_numpy(float) if SETTINGS["bands"] else est
+        lo = sub[f"{score}_lo"].to_numpy(float) if SETTINGS["bands"] else est
+        top = np.nanmax(np.where(np.isfinite(hi), hi, est))
+        bottom = np.nanmin(np.where(np.isfinite(lo), lo, est))
+        if score == "fbias":
+            out[score] = (0.0, min(max(1.5, 1.05 * top), 4.0))
+        elif score == "rmse":
+            out[score] = (0.0, 1.05 * top)
+        else:
+            out[score] = (min(0.0, bottom), min(1.0, 1.05 * top))
+    return out
 
 
 def _fbias_ylim(ax, df, col="fbias"):
@@ -180,7 +213,7 @@ def _name(fig_dir, stem, tag):
 # Lead-time curves
 # =============================================================================
 
-def plot_lead_by_model(df, score, model, fig_dir, tag, dpi):
+def plot_lead_by_model(df, score, model, fig_dir, tag, dpi, ylim=None):
     """Score vs lead for one model, one line per threshold."""
     label, _ = SCORES[score]
     sub = df[df["source"] == model]
@@ -201,7 +234,7 @@ def plot_lead_by_model(df, score, model, fig_dir, tag, dpi):
             f"{label}: {LABEL[model]}, by rainfall threshold",
             _windows_note(sub, SAMPLES["fixed"][1]) + "; hollow = fewer than "
             f"{MIN_EVENTS} event cells", score,
-            legend_title="3 h threshold (mm)", dpi=dpi)
+            legend_title="3 h threshold (mm)", dpi=dpi, ylim=ylim)
 
 
 def plot_lead_by_threshold(df, score, t, fig_dir, tag, dpi):
@@ -227,6 +260,7 @@ def plot_lead_by_threshold(df, score, t, fig_dir, tag, dpi):
 
 
 def plot_rmse_lead(sl, fig_dir, tag, dpi):
+    ylim = lock_ylims(sl, ["rmse"])["rmse"]
     """RMSE vs lead: per model (all and wet cells) and per cell set (models)."""
     paths = []
     for m in MODELS:
@@ -243,7 +277,7 @@ def plot_rmse_lead(sl, fig_dir, tag, dpi):
         p = _name(fig_dir, f"lead_rmse_model-{m}", tag)
         _finish(fig, ax, p, f"RMSE: {LABEL[m]}",
                 _windows_note(d, SAMPLES["fixed"][1]), dpi=dpi,
-                legend_title="cells scored")
+                legend_title="cells scored", ylim=ylim)
         paths.append(p)
     for cell in ("all", "wet"):
         fig, ax = _axes()
@@ -272,6 +306,7 @@ def plot_threshold(df, score, sample, fig_dir, tag, dpi):
     label, _ = SCORES[score]
     sub = df[df["lead_h"].astype(str).isin(["6", "all"])]
     ts = thresholds(sub)
+    sub = sub[sub["thresh_mm"].isin(ts)]
     pos = {t: i for i, t in enumerate(ts)}
     fig, ax = _axes()
     for m in MODELS:
@@ -304,10 +339,11 @@ def plot_rmse_bars(sl, sample, fig_dir, tag, dpi):
             if e.empty:
                 continue
             r = e.iloc[0]
+            err = ([[r["rmse"] - r["rmse_lo"]], [r["rmse_hi"] - r["rmse"]]]
+                   if SETTINGS["bands"] else None)
             ax.bar(i + (k - 1) * width, r["rmse"], width * 0.92,
                    color=COLOR[m], label=LABEL[m] if i == 0 else None,
-                   yerr=[[r["rmse"] - r["rmse_lo"]], [r["rmse_hi"] - r["rmse"]]],
-                   ecolor="#666666", capsize=3, zorder=3)
+                   yerr=err, ecolor="#666666", capsize=3, zorder=3)
     ax.set_xticks([0, 1])
     ax.set_xticklabels(["all cells", "wet cells"])
     ax.set_ylabel("RMSE (mm per 3 h)")
@@ -369,7 +405,8 @@ def plot_performance(df, sample, fig_dir, tag, dpi, models=MODELS,
         for _, r in d.iterrows():
             c = colors[r["thresh_mm"]]
             thin = r["obs_events"] < MIN_EVENTS
-            if ci and np.isfinite([r["pod_lo"], r["sr_lo"]]).all():
+            if (ci and SETTINGS["bands"]
+                    and np.isfinite([r["pod_lo"], r["sr_lo"]]).all()):
                 ax.plot([r["sr_lo"], r["sr_hi"]], [r["pod"], r["pod"]],
                         color=c, lw=1.0, alpha=0.7, zorder=3)
                 ax.plot([r["sr"], r["sr"]], [r["pod_lo"], r["pod_hi"]],
@@ -389,7 +426,7 @@ def plot_performance(df, sample, fig_dir, tag, dpi, models=MODELS,
     ax.set_title(title, fontsize=10.5, loc="left", pad=22)
     fig.text(0.01, 0.01, _windows_note(sub, SAMPLES[sample][1]).replace(
         "; 95 %", "\n95 %") + "; hollow = fewer than "
-        f"{MIN_EVENTS} event cells" + ("; crosses are the bands" if ci else ""),
+        f"{MIN_EVENTS} event cells" + ("; crosses are the bands" if ci and SETTINGS["bands"] else ""),
         fontsize=7, color="#555555", va="bottom")
     fig.subplots_adjust(left=0.1, right=0.72, bottom=0.12, top=0.86)
     p = Path(fig_dir) / f"{stem}_{sample}{tag}.png"
@@ -425,8 +462,10 @@ def plot_all_performance(ctc, sample, fig_dir, tag, dpi):
 # =============================================================================
 
 def make_all(pooled_dir, fig_dir, tag="_3km", only=("lead", "thresh", "perf"),
-             dpi=150, log=print):
-    """[Path] of every figure written."""
+             dpi=150, log=print, bands=True, max_thresh=None):
+    """[Path] of every figure written. `bands` draws the bootstrap bands and
+    crosses; `max_thresh` drops thresholds above it (mm)."""
+    SETTINGS["bands"], SETTINGS["max_thresh"] = bands, max_thresh
     tables = load(pooled_dir, tag)
     if not tables:
         raise SystemExit(f"plot_stats: no boot_all_*{tag}*.csv tables in "
@@ -441,10 +480,12 @@ def make_all(pooled_dir, fig_dir, tag="_3km", only=("lead", "thresh", "perf"),
         ctc = tables.get(("fixed", "ctc"))
         if ctc is not None:
             paths = []
+            ylims = lock_ylims(ctc, list(SCORES), thresholds(ctc))
             for score in SCORES:
                 for m in MODELS:
                     if (ctc["source"] == m).any():
-                        plot_lead_by_model(ctc, score, m, fig_dir, tag, dpi)
+                        plot_lead_by_model(ctc, score, m, fig_dir, tag, dpi,
+                                           ylim=ylims[score])
                         paths.append(_name(fig_dir, f"lead_{score}_model-{m}",
                                            tag))
                 for t in thresholds(ctc):
@@ -492,8 +533,14 @@ def main(argv=None):
     ap.add_argument("--only", nargs="+", choices=("lead", "thresh", "perf"),
                     default=["lead", "thresh", "perf"])
     ap.add_argument("--dpi", type=int, default=150)
+    ap.add_argument("--no-bands", action="store_true",
+                    help="no bootstrap bands, crosses or error bars")
+    ap.add_argument("--max-thresh", type=float, default=75.0,
+                    help="highest 3 h threshold (mm) drawn; default 75, use "
+                         "150 for all")
     a = ap.parse_args(argv)
-    make_all(a.pooled_dir, a.fig_dir, a.tag, tuple(a.only), a.dpi)
+    make_all(a.pooled_dir, a.fig_dir, a.tag, tuple(a.only), a.dpi,
+             bands=not a.no_bands, max_thresh=a.max_thresh)
 
 
 if __name__ == "__main__":
