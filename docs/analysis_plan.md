@@ -1228,6 +1228,9 @@ under To Consider).
      position at the window midpoint on the MRMS panel only; 100 % end darker
      (blue #003A63, vermillion #7A2D00), 0 % blank; larger fonts for slides; the
      figure title kept, the member counts only in the panel titles.
+     Colorbars: "% Members ≥ 25 mm / 3h" and "3h Precipitation (mm)"; the MRMS
+     panel is in mm on the eyeball colormap (0.25-125 mm, log, ticks 0.25 0.5 1 2.5
+     5 10 25 50 100).
      Built 2026-11-12 as `plot-swaths` (`analysis/swath_plots.py`; `--thresh-mm`,
      default 25; `--domain wide|wofs`): one pooled HFSA+HFSB panel, percent of
      members (0-100, ten steps, zero cells blank), WoFS white-to-blue with its

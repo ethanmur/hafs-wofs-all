@@ -45,7 +45,8 @@ import wofs_windows as ww
 from eyeball_plots import (_check_same_grid, _overlays, lead_text,
                            plotting_domain, runs_for)
 from obs_regrid_plots import LABELS, _draw_overlays
-from plot_common import add_us_geography, draw_precip
+from matplotlib.colors import LogNorm
+from plot_common import NODATA_COLOR, add_us_geography, qpf_continuous_cmap
 
 try:
     import cartopy.crs as ccrs
@@ -60,6 +61,10 @@ LEVELS = np.arange(0, 101, 10)
 PANEL_WIDTH_IN = 4.7
 DPI = 150
 FS_TICK, FS_PANEL, FS_TITLE, FS_SUB, FS_BAR = 13, 17, 21, 14, 14
+# The MRMS panel in mm: the eyeball-panel colormap (0.01-5 in) stretched over
+# 0.25-125 mm (0.01-4.9 in), with round colorbar ticks.
+MM_FLOOR, MM_MAX, MM_LEVELS = 0.25, 125.0, 20
+MM_TICKS = [0.25, 0.5, 1, 2.5, 5, 10, 25, 50, 100]
 
 
 # =============================================================================
@@ -142,6 +147,30 @@ def _frame(ax, domain, title, overlays, show_lat):
                    va="bottom", fontsize=FS_PANEL)
 
 
+def draw_precip_mm(ax, lon, lat, data_mm):
+    """Filled log-scale contours of 3 h rain in mm on the eyeball colormap;
+    cells under MM_FLOOR are left unpainted, missing cells grey. Returns the
+    mappable for the colorbar."""
+    data = np.ma.masked_invalid(np.asarray(data_mm, dtype=float))
+    bad = np.ma.getmaskarray(data)
+    if bad.any():
+        ax.pcolormesh(lon, lat, np.where(bad, 1.0, np.nan),
+                      cmap=ListedColormap([NODATA_COLOR]), shading="nearest",
+                      transform=ccrs.PlateCarree(), zorder=1)
+    levels = np.logspace(np.log10(MM_FLOOR), np.log10(MM_MAX), MM_LEVELS)
+    painted = np.ma.masked_where(bad | (np.nan_to_num(data_mm, nan=0.0)
+                                        < MM_FLOOR), data)
+    kwargs = dict(levels=levels, extend="max", cmap=qpf_continuous_cmap(),
+                  norm=LogNorm(vmin=MM_FLOOR, vmax=MM_MAX),
+                  transform=ccrs.PlateCarree(), zorder=2)
+    if painted.mask.all():          # a dry field: an invisible set for the bar
+        cf = ax.contourf(lon, lat, np.full(np.shape(lon), levels[1]), **kwargs)
+        for artist in getattr(cf, "collections", [cf]):
+            artist.set_visible(False)
+        return cf
+    return ax.contourf(lon, lat, painted, **kwargs)
+
+
 def _truth_contour(ax, lat, lon, truth, thresh_mm):
     if np.isfinite(truth).any() and np.nanmax(truth) >= thresh_mm:
         ax.contour(lon, lat, np.nan_to_num(truth, nan=0.0),
@@ -163,8 +192,7 @@ def _draw_best_track(ax, track, position):
 
 
 def swath_figure(lat, lon, wofs_pct, hafs_pct, truth, domain, track, position,
-                 titles, title, subtitle, thresh_mm, out_path, overlays=None,
-                 colorbar_style="true_scale", truth_label="MRMS"):
+                 titles, title, subtitle, thresh_mm, out_path, overlays=None):
     """Three map panels (WoFS | HAFS | MRMS) with the truth threshold contour
     on each; returns `out_path`."""
     lat_min, lat_max, lon_min, lon_max = domain
@@ -190,13 +218,13 @@ def swath_figure(lat, lon, wofs_pct, hafs_pct, truth, domain, track, position,
                                     norm=BoundaryNorm(LEVELS, cmap.N),
                                     shading="nearest", zorder=3,
                                     transform=ccrs.PlateCarree()))
-    mesh, scale = draw_precip(axes[2], lon, lat, truth, colorbar_style)
+    mesh = draw_precip_mm(axes[2], lon, lat, truth)
     for ax in axes:
         _truth_contour(ax, lat, lon, truth, thresh_mm)
         ax.apply_aspect()
     _draw_best_track(axes[2], track, position)
 
-    label = f"% of members at or above {thresh_mm:g} mm per 3 h"
+    label = f"% Members \u2265 {thresh_mm:g} mm / 3h"
     pos = [ax.get_position() for ax in axes]
     bar_w = 0.24 / fig_w
     cax = fig.add_axes([0.5 / fig_w, pos[0].y0, bar_w, pos[0].height])
@@ -210,9 +238,9 @@ def swath_figure(lat, lon, wofs_pct, hafs_pct, truth, domain, track, position,
     cb2.set_label(label, fontsize=FS_BAR)
     cax3 = fig.add_axes([pos[2].x1 + 0.3 / fig_w, pos[2].y0, bar_w,
                          pos[2].height])
-    cb3 = fig.colorbar(mesh, cax=cax3, ticks=scale["ticks"],
-                       extend=scale["extend"], format=scale["format"])
-    cb3.set_label(f"{truth_label} precipitation (in per 3 h)", fontsize=FS_BAR)
+    cb3 = fig.colorbar(mesh, cax=cax3, ticks=MM_TICKS, extend="max",
+                       format="%g")
+    cb3.set_label("3h Precipitation (mm)", fontsize=FS_BAR)
     for c in (cax, cax2, cax3):
         c.tick_params(labelsize=FS_TICK)
     extra += [cax, cax2, cax3]
@@ -285,10 +313,8 @@ def plot_swaths(case, thresh_mm=DEFAULT_THRESH_MM, log=print):
              f"HAFS ({len(hafs)} Members)", f"{LABELS[truth_source]} (Truth)"),
             f"{case.storm_name} {case.deployment}: 3 h rain ending "
             f"{w.end:%Y-%m-%d %HZ}",
-            f"Black contour: {LABELS[truth_source]} at {thresh_mm:g} mm "
-            f"({thresh_mm / 25.4:.2f} in) per 3 h",
-            thresh_mm, out, overlays, case.eyeball.colorbar_style,
-            LABELS[truth_source])
+            f"Black contour: {LABELS[truth_source]} at {thresh_mm:g} mm / 3h",
+            thresh_mm, out, overlays)
         written.append(out)
         log(f"  {w.end:%Y-%m-%d %HZ}  {member_text(members.shape[0], hafs)}  "
             f"(WoFS init {w_init:%d %H%MZ}, {lead_text(w_init, w)})  -> "
